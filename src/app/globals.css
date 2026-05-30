@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+/* ──────────────────────────────────────────────────────────────
+   "Ledger & Ember" — warm finance-console design system
+   ────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Surfaces */
+  --color-paper: #f5f1e9;
+  --color-surface: #fffdf9;
+  --color-surface-2: #faf6ef;
+  --color-line: #e7dfd1;
+  --color-line-strong: #d8cdb9;
+
+  /* Ink */
+  --color-ink: #1f1a16;
+  --color-ink-soft: #5c544b;
+  --color-muted: #8f8678;
+
+  /* Sidebar (espresso) */
+  --color-espresso: #1a1512;
+  --color-espresso-2: #241d18;
+  --color-espresso-line: #3a2f26;
+  --color-espresso-text: #d9cfc1;
+  --color-espresso-muted: #8c7f6f;
+
+  /* Accent — burnt ember */
+  --color-ember: #c2410c;
+  --color-ember-bright: #ea580c;
+  --color-ember-soft: #f4e3d6;
+
+  /* Semantic */
+  --color-debt: #b42318;
+  --color-debt-soft: #fbe8e6;
+  --color-credit: #1f7a4d;
+  --color-credit-soft: #e2f1e9;
+
+  /* Chart sequence (warm) */
+  --color-chart-1: #c2410c;
+  --color-chart-2: #d97706;
+  --color-chart-3: #a16207;
+  --color-chart-4: #9a6b4f;
+  --color-chart-5: #6f6253;
+
+  /* Fonts */
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Radii */
+  --radius-card: 14px;
+}
+
+@layer base {
+  html {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    font-family: var(--font-sans);
+  }
+
+  /* Tabular, lined-up numbers everywhere figures matter */
+  .nums {
+    font-feature-settings: "tnum" 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: var(--color-ember);
+    color: #fff;
+  }
+
+  /* Refined scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+}
+
+/* Subtle staggered entrance for page content */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise {
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}

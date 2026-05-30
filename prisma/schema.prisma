@@ -1,0 +1,167 @@
+// Restoran Tedarik & Cari Takip — veri modeli
+// Ayrıntılı açıklama için PROJECT.md (Bölüm 4) bakınız.
+// Para tutarları HER ZAMAN kuruş (integer) olarak saklanır.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enum'lar
+// ---------------------------------------------------------------------------
+
+enum Unit {
+  ADET
+  LITRE
+  KG
+  ML
+  GR
+  PAKET
+}
+
+enum PaymentMethod {
+  NAKIT
+  HAVALE
+  KART
+  CEK
+  DIGER
+}
+
+enum PriceSource {
+  PURCHASE // Fiyat bir alıştan geldi
+  MANUAL // Fiyat elle değiştirildi
+}
+
+// ---------------------------------------------------------------------------
+// Modeller
+// ---------------------------------------------------------------------------
+
+/// Toptancı / tedarikçi
+model Supplier {
+  id        String    @id @default(cuid())
+  name      String
+  phone     String?
+  note      String?
+  openingBalance Int  @default(0) // devir/açılış borcu (kuruş); + = ona borçluyuz
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete
+
+  products      Product[] // defaultSupplier olarak bağlı ürünler
+  purchases     Purchase[]
+  payments      Payment[]
+  priceHistory  PriceHistory[]
+
+  @@index([deletedAt])
+}
+
+/// Ürün (örn. "1 Litrelik Pepsi"). Alış birimleri ProductPackage'da tutulur.
+model Product {
+  id               String    @id @default(cuid())
+  name             String
+  baseUnit         Unit      @default(ADET)
+  defaultSupplier  Supplier? @relation(fields: [defaultSupplierId], references: [id])
+  defaultSupplierId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime? // soft delete
+
+  packages ProductPackage[]
+
+  @@index([deletedAt])
+  @@index([defaultSupplierId])
+}
+
+/// Bir ürünün alış birimi / paket türü (örn. "Koli" = 24 adet, "Adet" = 1).
+/// Her birim kendi son fiyatını ayrı tutar.
+model ProductPackage {
+  id             String    @id @default(cuid())
+  product        Product   @relation(fields: [productId], references: [id])
+  productId      String
+  name           String // "Koli", "Adet", "6'lı Paket" vb.
+  quantityInBase Int       @default(1) // bu birim kaç baseUnit'e denk
+  lastUnitPrice  Int? // son bilinen birim fiyat (kuruş) — otomatik doldurma
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime? // soft delete
+
+  purchaseItems PurchaseItem[]
+  priceHistory  PriceHistory[]
+
+  @@index([productId])
+  @@index([deletedAt])
+}
+
+/// Bir alış / sevkiyat başlığı (kalemler PurchaseItem'da).
+model Purchase {
+  id         String    @id @default(cuid())
+  supplier   Supplier  @relation(fields: [supplierId], references: [id])
+  supplierId String
+  date       DateTime  @default(now())
+  documentNo String?   // fatura / irsaliye no
+  dueDate    DateTime? // vade tarihi
+  note       String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime? // soft delete (iptal/yanlış giriş)
+
+  items PurchaseItem[]
+
+  @@index([supplierId])
+  @@index([date])
+  @@index([deletedAt])
+}
+
+/// Bir alış kalemi. unitPrice burada DONDURULUR; sonradan değişmez.
+model PurchaseItem {
+  id               String         @id @default(cuid())
+  purchase         Purchase       @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  purchaseId       String
+  package          ProductPackage @relation(fields: [productPackageId], references: [id])
+  productPackageId String
+  quantity         Float // kaç paket/birim (kg gibi ondalık olabilir, ör. 2.5)
+  unitPrice        Int // o anki birim (paket) fiyatı (kuruş)
+  lineTotal        Int // quantity * unitPrice (kuruş)
+
+  @@index([purchaseId])
+  @@index([productPackageId])
+}
+
+/// Bir toptancıya yapılan ödeme.
+model Payment {
+  id         String         @id @default(cuid())
+  supplier   Supplier       @relation(fields: [supplierId], references: [id])
+  supplierId String
+  amount     Int // kuruş
+  date       DateTime       @default(now())
+  method     PaymentMethod?
+  note       String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  deletedAt  DateTime? // soft delete
+
+  @@index([supplierId])
+  @@index([date])
+  @@index([deletedAt])
+}
+
+/// Bir alış biriminin fiyat değişim geçmişi.
+model PriceHistory {
+  id               String         @id @default(cuid())
+  package          ProductPackage @relation(fields: [productPackageId], references: [id])
+  productPackageId String
+  supplier         Supplier?      @relation(fields: [supplierId], references: [id])
+  supplierId       String?
+  unitPrice        Int // kuruş
+  effectiveDate    DateTime       @default(now())
+  source           PriceSource    @default(PURCHASE)
+  createdAt        DateTime       @default(now())
+
+  @@index([productPackageId])
+  @@index([supplierId])
+}
