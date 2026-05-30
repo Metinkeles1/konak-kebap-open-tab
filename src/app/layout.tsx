@@ -38,7 +38,7 @@ export default function RootLayout({
         <div className="flex min-h-dvh">
           <Sidebar />
           <main className="min-w-0 flex-1 px-8 py-8 lg:px-12">
-            <div className="mx-auto w-full max-w-6xl rise">{children}</div>
+            <div className="stagger mx-auto w-full max-w-6xl">{children}</div>
           </main>
         </div>
       </body>

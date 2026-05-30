@@ -41,6 +41,39 @@ export function BarList({
   );
 }
 
+/* Aylık dikey çubuklar — örn. son 6 ay alış trendi */
+export function MiniBars({
+  data,
+}: {
+  data: { label: string; total: number }[];
+}) {
+  const max = Math.max(...data.map((d) => d.total), 1);
+  return (
+    <div>
+      <div className="flex h-28 items-end gap-2">
+        {data.map((d, i) => {
+          const isLast = i === data.length - 1;
+          return (
+            <div
+              key={i}
+              className={`flex-1 rounded-t-md transition-all ${isLast ? "bg-ember" : "bg-ember/35"}`}
+              style={{ height: `${Math.max((d.total / max) * 100, 2)}%` }}
+              title={formatKurus(d.total)}
+            />
+          );
+        })}
+      </div>
+      <div className="mt-1.5 flex gap-2">
+        {data.map((d, i) => (
+          <span key={i} className="flex-1 text-center text-[10px] text-muted">
+            {d.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* Küçük çizgi grafiği (fiyat trendi) */
 export function Sparkline({
   points,

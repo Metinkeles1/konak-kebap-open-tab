@@ -19,10 +19,10 @@ export function PageHeader({
   return (
     <div className="mb-8 flex items-end justify-between gap-4">
       <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">
+        <h1 className="font-display text-[34px] font-semibold leading-none tracking-[-0.02em] text-ink">
           {title}
         </h1>
-        {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+        {subtitle && <p className="mt-2 text-sm text-muted">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -45,11 +45,11 @@ export function Card({
 }) {
   return (
     <section
-      className={`rounded-card border border-line bg-surface shadow-[0_1px_2px_rgba(31,26,22,0.04),0_8px_24px_-12px_rgba(31,26,22,0.08)] ${className}`}
+      className={`rounded-card border border-line bg-surface shadow-card ${className}`}
     >
       {title && (
-        <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <h2 className="text-sm font-semibold tracking-tight text-ink">
+        <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+          <h2 className="text-[13px] font-semibold tracking-tight text-ink">
             {title}
           </h2>
           {action}
@@ -82,8 +82,17 @@ export function Stat({
         : tone === "ember"
           ? "text-ember"
           : "text-ink";
+  const accent =
+    tone === "debt"
+      ? "bg-debt/70"
+      : tone === "credit"
+        ? "bg-credit/70"
+        : tone === "ember"
+          ? "bg-ember/70"
+          : "";
   return (
-    <div className="rounded-card border border-line bg-surface p-5 shadow-[0_1px_2px_rgba(31,26,22,0.04)]">
+    <div className="relative overflow-hidden rounded-card border border-line bg-surface p-5 shadow-card hover-lift">
+      {accent && <span className={`absolute inset-x-0 top-0 h-0.5 ${accent}`} />}
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
           {label}
@@ -91,7 +100,7 @@ export function Stat({
         {icon && <span className="text-muted">{icon}</span>}
       </div>
       <p
-        className={`nums mt-3 font-display text-[28px] font-semibold leading-none ${valueColor}`}
+        className={`nums mt-3 font-display text-[30px] font-semibold leading-none ${valueColor}`}
       >
         {value}
       </p>

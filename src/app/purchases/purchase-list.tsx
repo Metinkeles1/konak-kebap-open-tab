@@ -166,9 +166,12 @@ export function PurchaseList({
                             type="button"
                             onClick={() => remove(p)}
                             disabled={pending}
-                            className="rounded-md bg-debt px-2.5 py-1 font-medium text-white transition-colors hover:opacity-90 disabled:opacity-60"
+                            className="inline-flex items-center gap-1.5 rounded-md bg-debt px-2.5 py-1 font-medium text-white transition-colors hover:opacity-90 disabled:opacity-60"
                           >
-                            Evet, sil
+                            {deletingId === p.id && pending && (
+                              <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
+                            )}
+                            {deletingId === p.id && pending ? "Siliniyor…" : "Evet, sil"}
                           </button>
                           <button
                             type="button"

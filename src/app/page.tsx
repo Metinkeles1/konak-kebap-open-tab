@@ -1,13 +1,17 @@
 import Link from "next/link";
 import { formatKurus } from "@/lib/money";
+import { formatDate } from "@/lib/format";
 import {
   getDashboardStats,
   getSuppliersWithBalance,
   getProductSpend,
   getPriceTrends,
+  getMonthlyPurchaseTrend,
+  getSupplierMonthlySpend,
+  getPriceAlerts,
 } from "@/lib/analytics";
 import { PageHeader, Card, Stat, EmptyState } from "@/components/ui";
-import { BarList, Sparkline, TrendDelta } from "@/components/charts";
+import { BarList, Sparkline, TrendDelta, MiniBars } from "@/components/charts";
 
 const monthName = new Intl.DateTimeFormat("tr-TR", {
   month: "long",
@@ -15,12 +19,21 @@ const monthName = new Intl.DateTimeFormat("tr-TR", {
 });
 
 export default async function DashboardPage() {
-  const [stats, suppliers, productSpend, trends] = await Promise.all([
-    getDashboardStats(),
-    getSuppliersWithBalance(),
-    getProductSpend(6),
-    getPriceTrends(5),
-  ]);
+  const [stats, suppliers, productSpend, trends, monthlyTrend, supplierSpend, alerts] =
+    await Promise.all([
+      getDashboardStats(),
+      getSuppliersWithBalance(),
+      getProductSpend(6),
+      getPriceTrends(5),
+      getMonthlyPurchaseTrend(6),
+      getSupplierMonthlySpend(6),
+      getPriceAlerts({ thresholdPct: 10, sinceDays: 60, limit: 6 }),
+    ]);
+
+  // Aylık trendde son aya göre değişim (geçen aya kıyasla)
+  const lastMonth = monthlyTrend[monthlyTrend.length - 1]?.total ?? 0;
+  const prevMonth = monthlyTrend[monthlyTrend.length - 2]?.total ?? 0;
+  const monthDeltaPct = prevMonth ? ((lastMonth - prevMonth) / prevMonth) * 100 : 0;
 
   const debtors = suppliers
     .filter((s) => s.balance.balance > 0)
@@ -58,9 +71,51 @@ export default async function DashboardPage() {
           tone="ember"
           hint={monthName.format(new Date())}
         />
-        <Stat label="Toptancı" value={String(stats.supplierCount)} />
-        <Stat label="Ürün" value={String(stats.productCount)} />
+        <Stat
+          label="Bu ay ödeme"
+          value={formatKurus(stats.monthPayments)}
+          tone="credit"
+          hint="Toptancılara yapılan"
+        />
+        <Stat label="Toptancı" value={String(stats.supplierCount)} hint={`${stats.productCount} ürün`} />
       </div>
+
+      {/* Fiyat zammı uyarıları — son 60 günde ≥%10 zamlananlar */}
+      {alerts.length > 0 && (
+        <div className="mt-6">
+          <Card
+            title="⚠ Fiyat zammı uyarıları"
+            action={
+              <Link href="/products" className="text-xs font-medium text-ember hover:underline">
+                Ürünler →
+              </Link>
+            }
+          >
+            <ul className="divide-y divide-line">
+              {alerts.map((a, i) => (
+                <li key={i} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">
+                      {a.productName} <span className="text-muted">· {a.packageName}</span>
+                    </p>
+                    <p className="text-xs text-muted">
+                      <span className="nums">{formatDate(a.date)}</span>
+                      {a.supplierName ? ` · ${a.supplierName}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="nums text-sm text-muted">
+                      {formatKurus(a.oldPrice)} <span className="text-muted">→</span>{" "}
+                      <span className="font-medium text-ink">{formatKurus(a.newPrice)}</span>
+                    </span>
+                    <TrendDelta pct={a.pct} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      )}
 
       {/* Orta blok */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
@@ -117,9 +172,34 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
+      {/* Aylık alış trendi + bu ay toptancı bazında alış */}
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card
+          title="Aylık alış trendi"
+          action={
+            lastMonth > 0 ? (
+              <span className="flex items-center gap-2 text-xs text-muted">
+                {monthName.format(new Date())}: {formatKurus(lastMonth)}
+                <TrendDelta pct={monthDeltaPct} />
+              </span>
+            ) : undefined
+          }
+        >
+          {monthlyTrend.every((m) => m.total === 0) ? (
+            <p className="py-6 text-center text-sm text-muted">Henüz alış yok.</p>
+          ) : (
+            <MiniBars data={monthlyTrend} />
+          )}
+        </Card>
+
+        <Card title="Bu ay toptancı bazında alış">
+          <BarList items={supplierSpend} emptyText="Bu ay henüz alış yok." />
+        </Card>
+      </div>
+
       {/* En çok harcanan ürünler */}
       <div className="mt-6">
-        <Card title="En çok harcanan ürünler">
+        <Card title="En çok harcanan ürünler (tüm zaman)">
           <BarList items={productSpend} emptyText="Henüz alış yok." />
         </Card>
       </div>
