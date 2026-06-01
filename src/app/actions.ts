@@ -100,38 +100,115 @@ function baseUnitFromLabel(label?: string): "ADET" | "LITRE" | "KG" | "ML" | "GR
   return map[label.trim().toLocaleLowerCase("tr")] ?? "ADET";
 }
 
+// Ürün ekleme kuralı:
+//  - Aynı isimli ürün YOKSA: yeni ürün oluştur (+ varsa birim/fiyat). Toptancı +
+//    fiyat verildiyse o toptancının fiyatı matriste hemen görünsün diye
+//    PriceHistory yazılır.
+//  - Aynı isimli ürün VARSA: ürün TEK kayıt kalır; aynı toptancıda kopya
+//    engellenir, FARKLI toptancıda ise o toptancı yeni bir fiyat kaynağı olarak
+//    eklenir (aynı ürünü birden çok toptancıdan alabilmek için).
+const eq = (a: string, b: string) =>
+  a.toLocaleLowerCase("tr") === b.toLocaleLowerCase("tr");
+
 export async function createProduct(fd: FormData) {
   const unit = str(fd, "unit"); // alış birimi etiketi (Koli, Kg, Balya…)
+  const supplierId = str(fd, "supplierId");
   const data = productCreateSchema.parse({
     name: str(fd, "name"),
     baseUnit: baseUnitFromLabel(unit),
-    defaultSupplierId: str(fd, "supplierId"),
+    defaultSupplierId: supplierId,
   });
   const priceTl = str(fd, "price");
-  const lastUnitPrice = priceTl ? tlToKurus(priceTl) : undefined;
+  const price = priceTl ? tlToKurus(priceTl) : undefined;
 
-  // Aynı isim zaten varsa engelle — büyük/küçük harf farkı sayılmaz ("Pepsi" = "pepsi").
-  const dup = await prisma.product.findFirst({
+  const existing = await prisma.product.findFirst({
     where: { name: { equals: data.name, mode: "insensitive" }, deletedAt: null },
-    select: { name: true },
+    include: { packages: { where: { deletedAt: null } } },
   });
-  if (dup) {
-    throw new Error(
-      `"${dup.name}" zaten kayıtlı. Aynı ürünü tekrar eklemeyin (büyük/küçük harf farkı sayılmaz).`,
-    );
+
+  if (existing) {
+    if (!supplierId) {
+      throw new Error(
+        `"${existing.name}" zaten kayıtlı. Aynı ürüne farklı bir toptancının fiyatını eklemek için bir toptancı seçin.`,
+      );
+    }
+    // Bu ürün bu toptancıda zaten var mı? (varsayılan toptancı ya da fiyat geçmişi)
+    const alreadyForSupplier =
+      existing.defaultSupplierId === supplierId ||
+      (await prisma.priceHistory.findFirst({
+        where: { supplierId, package: { productId: existing.id } },
+        select: { id: true },
+      })) != null;
+    if (alreadyForSupplier) {
+      throw new Error(
+        `"${existing.name}" bu toptancıda zaten kayıtlı. Fiyatı güncellemek için ürüne tıklayıp düzenleyin.`,
+      );
+    }
+    if (price == null) {
+      throw new Error(`"${existing.name}" için bu toptancının fiyatını girin.`);
+    }
+    // Hangi birime yazılacak: etiket verildiyse o (yoksa oluştur); verilmediyse
+    // ürünün tek birimi varsa o, yoksa birim sorulur.
+    const matched = unit
+      ? existing.packages.find((p) => eq(p.name, unit))
+      : existing.packages.length === 1
+        ? existing.packages[0]
+        : undefined;
+    if (!matched && !unit) {
+      throw new Error("Hangi birim için fiyat? Alış birimi yazın (ör. Koli).");
+    }
+
+    await prisma.$transaction(async (tx) => {
+      let packageId: string;
+      if (matched) {
+        packageId = matched.id;
+        await tx.productPackage.update({
+          where: { id: matched.id },
+          data: { lastUnitPrice: price },
+        });
+      } else {
+        const created = await tx.productPackage.create({
+          data: { productId: existing.id, name: unit!, quantityInBase: 1, lastUnitPrice: price },
+        });
+        packageId = created.id;
+      }
+      await tx.priceHistory.create({
+        data: { productPackageId: packageId, supplierId, unitPrice: price, source: "MANUAL" },
+      });
+    });
+
+    revalidatePath("/products");
+    revalidatePath("/purchases");
+    return;
   }
 
-  await prisma.product.create({
-    data: {
-      name: data.name,
-      baseUnit: data.baseUnit,
-      defaultSupplierId: data.defaultSupplierId,
-      // Birim girildiyse ürünü ilk alış birimi (+ varsa son fiyat) ile birlikte oluştur.
-      ...(unit
-        ? { packages: { create: { name: unit, quantityInBase: 1, lastUnitPrice } } }
-        : {}),
-    },
+  // Yeni ürün
+  await prisma.$transaction(async (tx) => {
+    const created = await tx.product.create({
+      data: {
+        name: data.name,
+        baseUnit: data.baseUnit,
+        defaultSupplierId: data.defaultSupplierId,
+        // Birim girildiyse ürünü ilk alış birimi (+ varsa son fiyat) ile birlikte oluştur.
+        ...(unit
+          ? { packages: { create: { name: unit, quantityInBase: 1, lastUnitPrice: price } } }
+          : {}),
+      },
+      include: { packages: true },
+    });
+    // Toptancı + fiyat + birim varsa matriste hemen görünmesi için fiyat geçmişi yaz.
+    if (supplierId && price != null && created.packages[0]) {
+      await tx.priceHistory.create({
+        data: {
+          productPackageId: created.packages[0].id,
+          supplierId,
+          unitPrice: price,
+          source: "MANUAL",
+        },
+      });
+    }
   });
+
   revalidatePath("/products");
   revalidatePath("/purchases");
 }
@@ -232,7 +309,9 @@ export async function deleteProduct(fd: FormData) {
     where: { id },
     data: { deletedAt: new Date() },
   });
+  // Liste tazelenince modal açık ürünü bulamaz ve kendiliğinden kapanır.
   revalidatePath("/products");
+  revalidatePath("/purchases");
 }
 
 // --- Alış ---

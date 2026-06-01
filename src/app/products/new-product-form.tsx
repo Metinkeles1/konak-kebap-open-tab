@@ -78,8 +78,9 @@ export function NewProductForm({
       )}
 
       <p className="mt-2.5 text-xs text-muted">
-        Alış birimi = ürünü nasıl satın aldığın (Koli, Kg, Balya…). Aynı ürüne sonradan başka birim de
-        ekleyebilirsin.
+        Alış birimi = ürünü nasıl satın aldığın (Koli, Kg, Balya…). Aynı ürünü <strong>farklı bir
+        toptancı</strong> seçip tekrar eklersen, o toptancının fiyatı da ürünün karşılaştırmasına eklenir
+        (aynı toptancıda tekrar eklenemez).
       </p>
     </>
   );

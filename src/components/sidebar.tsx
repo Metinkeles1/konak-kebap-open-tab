@@ -28,7 +28,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="grain sticky top-0 flex h-dvh w-64 shrink-0 flex-col border-r border-espresso-line bg-espresso bg-linear-to-b from-espresso-2 to-espresso text-espresso-text">
+    <aside className="grain flex h-dvh w-64 shrink-0 flex-col overflow-y-auto border-r border-espresso-line bg-espresso bg-linear-to-b from-espresso-2 to-espresso text-espresso-text">
       {/* Brand */}
       <div className="relative z-10 flex items-center gap-3 px-6 py-7">
         <span className="grid h-10 w-10 place-items-center rounded-xl bg-linear-to-br from-ember-bright to-ember text-lg shadow-lg shadow-black/40 ring-1 ring-white/10">

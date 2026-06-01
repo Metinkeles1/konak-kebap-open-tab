@@ -1,14 +1,37 @@
 import { prisma } from "@/lib/prisma";
-import { getSupplierBalance, type SupplierBalance } from "@/lib/balance";
+import type { SupplierBalance } from "@/lib/balance";
 
 /** Panel üst kart metrikleri. */
 export async function getDashboardStats() {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const [suppliers, productCount, monthAgg, monthPayAgg] = await Promise.all([
-    prisma.supplier.findMany({ where: { deletedAt: null }, select: { id: true } }),
+  // Toplam borç = Σ açılış + Σ alış − Σ ödeme (yalnızca silinmemiş toptancılar).
+  // Önceden toptancı başına 3 sorgu atılıyordu (N+1); artık sabit sayıda
+  // toplulaştırma sorgusuyla aynı sonucu tek seferde alıyoruz.
+  const [
+    supplierCount,
+    productCount,
+    openingAgg,
+    purchasedAgg,
+    paidAgg,
+    monthAgg,
+    monthPayAgg,
+  ] = await Promise.all([
+    prisma.supplier.count({ where: { deletedAt: null } }),
     prisma.product.count({ where: { deletedAt: null } }),
+    prisma.supplier.aggregate({
+      _sum: { openingBalance: true },
+      where: { deletedAt: null },
+    }),
+    prisma.purchaseItem.aggregate({
+      _sum: { lineTotal: true },
+      where: { purchase: { deletedAt: null, supplier: { deletedAt: null } } },
+    }),
+    prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: { deletedAt: null, supplier: { deletedAt: null } },
+    }),
     prisma.purchaseItem.aggregate({
       _sum: { lineTotal: true },
       where: { purchase: { deletedAt: null, date: { gte: monthStart } } },
@@ -19,16 +42,16 @@ export async function getDashboardStats() {
     }),
   ]);
 
-  const balances = await Promise.all(
-    suppliers.map((s) => getSupplierBalance(s.id)),
-  );
-  const totalDebt = balances.reduce((sum, b) => sum + b.balance, 0);
+  const totalDebt =
+    (openingAgg._sum.openingBalance ?? 0) +
+    (purchasedAgg._sum.lineTotal ?? 0) -
+    (paidAgg._sum.amount ?? 0);
 
   return {
     totalDebt,
     monthSpend: monthAgg._sum.lineTotal ?? 0,
     monthPayments: monthPayAgg._sum.amount ?? 0,
-    supplierCount: suppliers.length,
+    supplierCount,
     productCount,
   };
 }
@@ -150,39 +173,81 @@ export type SupplierWithBalance = {
 
 /** Tüm toptancılar + bakiyeleri (borç çoktan aza). */
 export async function getSuppliersWithBalance(): Promise<SupplierWithBalance[]> {
-  const suppliers = await prisma.supplier.findMany({
-    where: { deletedAt: null },
-    orderBy: { name: "asc" },
-  });
-  const result = await Promise.all(
-    suppliers.map(async (s) => ({
-      id: s.id,
-      name: s.name,
-      phone: s.phone,
-      balance: await getSupplierBalance(s.id),
-    })),
-  );
-  return result.sort((a, b) => b.balance.balance - a.balance.balance);
+  // Önceden toptancı başına 3 sorgu (N+1) atılıyordu. Artık 3 sabit sorgu:
+  // toptancılar + tüm alış kalemleri + ödeme toplamları; gruplama bellekte.
+  const [suppliers, purchaseItems, paymentGroups] = await Promise.all([
+    prisma.supplier.findMany({
+      where: { deletedAt: null },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, phone: true, openingBalance: true },
+    }),
+    prisma.purchaseItem.findMany({
+      where: { purchase: { deletedAt: null, supplier: { deletedAt: null } } },
+      select: { lineTotal: true, purchase: { select: { supplierId: true } } },
+    }),
+    prisma.payment.groupBy({
+      by: ["supplierId"],
+      where: { deletedAt: null, supplier: { deletedAt: null } },
+      _sum: { amount: true },
+    }),
+  ]);
+
+  const purchasedBySupplier = new Map<string, number>();
+  for (const it of purchaseItems) {
+    const sid = it.purchase.supplierId;
+    purchasedBySupplier.set(sid, (purchasedBySupplier.get(sid) ?? 0) + it.lineTotal);
+  }
+  const paidBySupplier = new Map<string, number>();
+  for (const g of paymentGroups) {
+    paidBySupplier.set(g.supplierId, g._sum.amount ?? 0);
+  }
+
+  return suppliers
+    .map((s) => {
+      const totalPurchased = purchasedBySupplier.get(s.id) ?? 0;
+      const totalPaid = paidBySupplier.get(s.id) ?? 0;
+      return {
+        id: s.id,
+        name: s.name,
+        phone: s.phone,
+        balance: {
+          supplierId: s.id,
+          openingBalance: s.openingBalance,
+          totalPurchased,
+          totalPaid,
+          balance: s.openingBalance + totalPurchased - totalPaid,
+        },
+      };
+    })
+    .sort((a, b) => b.balance.balance - a.balance.balance);
 }
 
 /** En çok harcanan ürünler (silinmemiş alışlardaki toplam tutar). */
 export async function getProductSpend(limit = 6) {
-  const items = await prisma.purchaseItem.findMany({
+  // Tüm kalem satırlarını belleğe çekmek yerine DB'de birim (paket) bazında
+  // topla; sonra paketleri ürüne eşleyip ürün bazında birleştir. Satır
+  // transferi O(alış kalemi) yerine O(birim) olur.
+  const grouped = await prisma.purchaseItem.groupBy({
+    by: ["productPackageId"],
     where: { purchase: { deletedAt: null } },
-    select: {
-      lineTotal: true,
-      quantity: true,
-      package: { select: { product: { select: { id: true, name: true } } } },
-    },
+    _sum: { lineTotal: true, quantity: true },
   });
+  if (!grouped.length) return [];
+
+  const packages = await prisma.productPackage.findMany({
+    where: { id: { in: grouped.map((g) => g.productPackageId) } },
+    select: { id: true, product: { select: { id: true, name: true } } },
+  });
+  const pkgToProduct = new Map(packages.map((p) => [p.id, p.product]));
 
   const byProduct = new Map<string, { name: string; total: number; qty: number }>();
-  for (const it of items) {
-    const p = it.package.product;
-    const cur = byProduct.get(p.id) ?? { name: p.name, total: 0, qty: 0 };
-    cur.total += it.lineTotal;
-    cur.qty += it.quantity;
-    byProduct.set(p.id, cur);
+  for (const g of grouped) {
+    const product = pkgToProduct.get(g.productPackageId);
+    if (!product) continue;
+    const cur = byProduct.get(product.id) ?? { name: product.name, total: 0, qty: 0 };
+    cur.total += g._sum.lineTotal ?? 0;
+    cur.qty += g._sum.quantity ?? 0;
+    byProduct.set(product.id, cur);
   }
 
   return [...byProduct.values()]

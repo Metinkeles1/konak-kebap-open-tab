@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getSupplierBalance } from "@/lib/balance";
 import { formatKurus } from "@/lib/money";
 import { formatDate, formatDateTime } from "@/lib/format";
 import {
@@ -38,8 +37,7 @@ export default async function SupplierDetailPage({
   });
   if (!supplier) notFound();
 
-  const [balance, purchases, payments, catalog] = await Promise.all([
-    getSupplierBalance(id),
+  const [purchases, payments, catalog] = await Promise.all([
     prisma.purchase.findMany({
       where: { supplierId: id, deletedAt: null },
       orderBy: { date: "asc" },
@@ -55,6 +53,20 @@ export default async function SupplierDetailPage({
       include: { packages: { where: { deletedAt: null }, orderBy: { name: "asc" } } },
     }),
   ]);
+
+  // Bakiye, zaten çekilmiş olan alış+ödemelerden hesaplanır — ayrıca
+  // getSupplierBalance çağırıp 3 toplulaştırma sorgusu daha atmaya gerek yok.
+  const totalPurchased = purchases.reduce(
+    (s, p) => s + p.items.reduce((a, i) => a + i.lineTotal, 0),
+    0,
+  );
+  const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+  const balance = {
+    openingBalance: supplier.openingBalance,
+    totalPurchased,
+    totalPaid,
+    balance: supplier.openingBalance + totalPurchased - totalPaid,
+  };
 
   // --- Cari ekstre: açılış + alış (+) + ödeme (−), kronolojik, yürüyen bakiyeli ---
   const txns = [
