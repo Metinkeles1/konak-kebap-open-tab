@@ -120,6 +120,8 @@ export async function createProduct(fd: FormData) {
   });
   const priceTl = str(fd, "price");
   const price = priceTl ? tlToKurus(priceTl) : undefined;
+  const qibRaw = str(fd, "quantityInBase");
+  const qib = normQib(qibRaw ? Number(qibRaw) : undefined); // 1 koli = kaç baz birim
 
   const existing = await prisma.product.findFirst({
     where: { name: { equals: data.name, mode: "insensitive" }, deletedAt: null },
@@ -168,7 +170,7 @@ export async function createProduct(fd: FormData) {
         });
       } else {
         const created = await tx.productPackage.create({
-          data: { productId: existing.id, name: unit!, quantityInBase: 1, lastUnitPrice: price },
+          data: { productId: existing.id, name: unit!, quantityInBase: qib, lastUnitPrice: price },
         });
         packageId = created.id;
       }
@@ -191,7 +193,7 @@ export async function createProduct(fd: FormData) {
         defaultSupplierId: data.defaultSupplierId,
         // Birim girildiyse ürünü ilk alış birimi (+ varsa son fiyat) ile birlikte oluştur.
         ...(unit
-          ? { packages: { create: { name: unit, quantityInBase: 1, lastUnitPrice: price } } }
+          ? { packages: { create: { name: unit, quantityInBase: qib, lastUnitPrice: price } } }
           : {}),
       },
       include: { packages: true },
@@ -262,6 +264,49 @@ export async function updatePackagePrice(fd: FormData) {
   revalidatePath("/purchases");
 }
 
+// Belirli bir TOPTANCININ, belirli bir alış biriminin fiyatını ELLE güncelle/ekle
+// (alış girmeden). Her toptancı kendi fiyatını bağımsız tutar; bu kayıt yalnızca
+// seçilen toptancıya yazılır. PriceHistory'ye MANUAL kaynaklı bir satır eklenir;
+// böylece matris güncellenir ve zam/indirim oku otomatik hesaplanır.
+// Düzenlenen toptancı ürünün VARSAYILAN toptancısıysa, yeni alışta otomatik dolan
+// güncel fiyat tutarlı kalsın diye lastUnitPrice de güncellenir.
+export async function updateSupplierPackagePrice(fd: FormData) {
+  const packageId = str(fd, "packageId");
+  const supplierId = str(fd, "supplierId");
+  const priceTl = str(fd, "price");
+  if (!packageId || !supplierId || !priceTl) return;
+  const unitPrice = tlToKurus(priceTl);
+
+  const pkg = await prisma.productPackage.findFirst({
+    where: { id: packageId, deletedAt: null },
+    include: { product: { select: { defaultSupplierId: true } } },
+  });
+  if (!pkg) return;
+
+  // Bu toptancının bu birimdeki mevcut en son fiyatı ile aynıysa boşuna kayıt açma.
+  const latest = await prisma.priceHistory.findFirst({
+    where: { productPackageId: packageId, supplierId },
+    orderBy: { effectiveDate: "desc" },
+    select: { unitPrice: true },
+  });
+  if (latest?.unitPrice === unitPrice) return;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.priceHistory.create({
+      data: { productPackageId: packageId, supplierId, unitPrice, source: "MANUAL" },
+    });
+    if (pkg.product.defaultSupplierId === supplierId) {
+      await tx.productPackage.update({
+        where: { id: packageId },
+        data: { lastUnitPrice: unitPrice },
+      });
+    }
+  });
+
+  revalidatePath("/products");
+  revalidatePath("/purchases");
+}
+
 // Bir birimin fiyatını baz alıp ürünün DİĞER birimlerini quantityInBase oranıyla eşitle.
 // "birim başı fiyat" = baz birim fiyatı / quantityInBase; her birim = birimBaşı × kendi quantityInBase.
 // İsteme bağlı (buton) — otomatik değil; toptan indirimi gereken durumda kullanılmaz.
@@ -302,6 +347,20 @@ export async function applyProportionalPrice(fd: FormData) {
   revalidatePath("/purchases");
 }
 
+// Ürünün varsayılan toptancısını ayarla (boş = yok). Varsayılan toptancı, yeni
+// alışta otomatik dolan "güncel fiyat"ın (lastUnitPrice) sahibidir.
+export async function setDefaultSupplier(fd: FormData) {
+  const productId = str(fd, "productId");
+  if (!productId) return;
+  const supplierId = str(fd, "supplierId") ?? null;
+  await prisma.product.update({
+    where: { id: productId },
+    data: { defaultSupplierId: supplierId },
+  });
+  revalidatePath("/products");
+  revalidatePath("/purchases");
+}
+
 export async function deleteProduct(fd: FormData) {
   const id = str(fd, "id");
   if (!id) return;
@@ -333,6 +392,7 @@ export type NewPurchaseItem =
       unit: string; // "Adet" | "Kg" | "Kasa" | "Litre" | "Paket" | "Gram"
       quantity: number;
       unitPriceTl: string;
+      quantityInBase?: number; // bu paket kaç baz birim içerir (örn. 1 koli = 24 adet)
     }
   | {
       kind: "new";
@@ -340,7 +400,14 @@ export type NewPurchaseItem =
       unit: string;
       quantity: number;
       unitPriceTl: string;
+      quantityInBase?: number; // bu paket kaç baz birim içerir
     };
+
+// Paketteki baz birim sayısını normalle (pozitif tam sayı, en az 1).
+const normQib = (n?: number) => {
+  const v = Math.round(n ?? 1);
+  return Number.isFinite(v) && v > 0 ? v : 1;
+};
 
 // Serbest birim etiketini şemadaki Unit enum'una eşle (baseUnit için).
 const UNIT_TO_BASE: Record<string, "ADET" | "LITRE" | "KG" | "ML" | "GR" | "PAKET"> = {
@@ -377,6 +444,22 @@ export async function createPurchase(input: {
     : [];
   const byId = new Map(packages.map((p) => [p.id, p]));
 
+  // Boş bırakılan fiyatlar için: bu toptancının bu birimdeki EN SON fiyatı.
+  // Böylece otomatik dolan fiyat global değil, seçilen toptancıya özgü olur.
+  const supplierPrices = existingIds.length
+    ? await prisma.priceHistory.findMany({
+        where: { supplierId: input.supplierId, productPackageId: { in: existingIds } },
+        orderBy: { effectiveDate: "desc" },
+        select: { productPackageId: true, unitPrice: true },
+      })
+    : [];
+  const supplierLastPrice = new Map<string, number>();
+  for (const h of supplierPrices) {
+    if (!supplierLastPrice.has(h.productPackageId)) {
+      supplierLastPrice.set(h.productPackageId, h.unitPrice);
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     const resolved: {
       productPackageId: string;
@@ -405,7 +488,7 @@ export async function createPurchase(input: {
           const pkg =
             sameUnit ??
             (await tx.productPackage.create({
-              data: { productId: existing.id, name: item.unit, quantityInBase: 1, lastUnitPrice: price },
+              data: { productId: existing.id, name: item.unit, quantityInBase: normQib(item.quantityInBase), lastUnitPrice: price },
             }));
           productPackageId = pkg.id;
         } else {
@@ -415,7 +498,7 @@ export async function createPurchase(input: {
               name: item.name.trim(),
               baseUnit: UNIT_TO_BASE[item.unit] ?? "ADET",
               defaultSupplierId: input.supplierId,
-              packages: { create: { name: item.unit, quantityInBase: 1, lastUnitPrice: price } },
+              packages: { create: { name: item.unit, quantityInBase: normQib(item.quantityInBase), lastUnitPrice: price } },
             },
             include: { packages: true },
           });
@@ -427,7 +510,7 @@ export async function createPurchase(input: {
         const price = item.unitPriceTl.trim().length ? tlToKurus(item.unitPriceTl) : null;
         if (price == null) throw new Error(`'${item.unit}' birimi için fiyat gerekli`);
         const pkg = await tx.productPackage.create({
-          data: { productId: item.productId, name: item.unit, quantityInBase: 1, lastUnitPrice: price },
+          data: { productId: item.productId, name: item.unit, quantityInBase: normQib(item.quantityInBase), lastUnitPrice: price },
         });
         productPackageId = pkg.id;
         unitPrice = price;
@@ -435,7 +518,8 @@ export async function createPurchase(input: {
         const pkg = byId.get(item.productPackageId);
         if (!pkg) throw new Error("Alış birimi bulunamadı");
         const given = item.unitPriceTl?.trim().length ? tlToKurus(item.unitPriceTl) : null;
-        const resolvedPrice = given ?? pkg.lastUnitPrice;
+        // Öncelik: girilen fiyat → bu toptancının son fiyatı → global son fiyat.
+        const resolvedPrice = given ?? supplierLastPrice.get(pkg.id) ?? pkg.lastUnitPrice;
         if (resolvedPrice == null) {
           throw new Error(`'${pkg.name}' için fiyat gerekli (kayıtlı son fiyat yok)`);
         }

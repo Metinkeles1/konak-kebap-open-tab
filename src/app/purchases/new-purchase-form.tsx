@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { createPurchase, type NewPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
+import { isPackagingUnit } from "@/lib/units";
 
 type SupplierOpt = { id: string; name: string };
 type Unit = { packageId: string; unit: string; lastPrice: number | null };
@@ -15,6 +16,7 @@ type Row = {
   isNewProduct: boolean; // tamamen yeni ürün
   unitChoice: string; // "pkg:<id>" | "__new__" | ""
   unitText: string; // serbest birim adı (yeni birim/yeni ürün)
+  baseCount: string; // yeni birim için: 1 paket kaç baz birim (1 koli = 24)
   quantity: string;
   price: string;
   open: boolean;
@@ -29,6 +31,7 @@ const newRow = (): Row => ({
   isNewProduct: false,
   unitChoice: "",
   unitText: "",
+  baseCount: "",
   quantity: "1",
   price: "",
   open: false,
@@ -43,6 +46,12 @@ const lc = (s: string) => s.trim().toLocaleLowerCase("tr");
 const toQty = (s: string) => {
   const n = Number(s.trim().replace(",", "."));
   return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
+// "1 koli = kaç baz birim" — pozitif tam sayı, yoksa undefined (sunucu 1 sayar)
+const toBaseCount = (s: string) => {
+  const n = parseInt(s.trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 
 // Yerel saate göre şimdi (yyyy-mm-ddTHH:mm) — input[type=datetime-local] için.
@@ -125,15 +134,21 @@ export function NewPurchaseForm({
 
       if (r.isNewProduct) {
         if (!r.query.trim()) continue;
+        const unit = r.unitText.trim() || "Adet";
         if (!r.price.trim()) return setError(`'${r.query.trim()}' için fiyat girin.`);
-        payload.push({ kind: "new", name: r.query.trim(), unit: r.unitText.trim() || "Adet", quantity: qty, unitPriceTl: r.price });
+        if (isPackagingUnit(unit) && !toBaseCount(r.baseCount))
+          return setError(`'${r.query.trim()}' · ${unit}: 1 ${unit} kaç adet? girin.`);
+        payload.push({ kind: "new", name: r.query.trim(), unit, quantity: qty, unitPriceTl: r.price, quantityInBase: toBaseCount(r.baseCount) });
       } else if (r.productId) {
         if (r.unitChoice.startsWith("pkg:")) {
           payload.push({ kind: "existing", productPackageId: r.unitChoice.slice(4), quantity: qty, unitPriceTl: r.price });
         } else if (r.unitChoice === "__new__") {
-          if (!r.unitText.trim()) return setError(`'${r.query}' için birim adı yazın (ör. Koli).`);
-          if (!r.price.trim()) return setError(`'${r.query}' · ${r.unitText.trim()} için fiyat girin.`);
-          payload.push({ kind: "newUnit", productId: r.productId, unit: r.unitText.trim(), quantity: qty, unitPriceTl: r.price });
+          const unit = r.unitText.trim();
+          if (!unit) return setError(`'${r.query}' için birim adı yazın (ör. Koli).`);
+          if (!r.price.trim()) return setError(`'${r.query}' · ${unit} için fiyat girin.`);
+          if (isPackagingUnit(unit) && !toBaseCount(r.baseCount))
+            return setError(`'${r.query}' · ${unit}: 1 ${unit} kaç adet? girin.`);
+          payload.push({ kind: "newUnit", productId: r.productId, unit, quantity: qty, unitPriceTl: r.price, quantityInBase: toBaseCount(r.baseCount) });
         }
       }
     }
@@ -221,9 +236,16 @@ export function NewPurchaseForm({
                 const pkg = selectedPkg(row);
                 const unitActive = row.isNewProduct || !!row.productId;
                 const freeUnit = row.isNewProduct || row.unitChoice === "__new__";
+                // Birim bir paketse (Koli/Kasa…) içindeki adet sorulur; tekil birimde (Adet/Kg) sorulmaz.
+                const packaging = freeUnit && isPackagingUnit(row.unitText);
+                // Yeni birim için canlı birim başı fiyat: 1 koli = N adet ise fiyat / N.
+                const baseCount = toBaseCount(row.baseCount);
+                const rowPrice = rowPriceKurus(row);
+                const showPerBase = packaging && baseCount != null && baseCount > 1 && rowPrice != null;
 
                 return (
-                  <div key={idx} className="grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2">
+                  <div key={idx} className="space-y-1">
+                  <div className="grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2">
                     {/* Ürün combobox */}
                     <div className="relative">
                       <input
@@ -282,14 +304,26 @@ export function NewPurchaseForm({
                     {!unitActive ? (
                       <div className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-muted">—</div>
                     ) : freeUnit ? (
-                      <input
-                        list="unit-suggestions"
-                        value={row.unitText}
-                        onChange={(e) => patch(idx, { unitText: e.target.value })}
-                        placeholder="Birim (Koli…)"
-                        className={`${field} border-ember/60`}
-                        title="Yeni birim adı"
-                      />
+                      <div className="flex flex-col gap-1">
+                        <input
+                          list="unit-suggestions"
+                          value={row.unitText}
+                          onChange={(e) => patch(idx, { unitText: e.target.value })}
+                          placeholder="Birim (Koli…)"
+                          className={`${field} border-ember/60`}
+                          title="Yeni birim adı"
+                        />
+                        {packaging && (
+                          <input
+                            inputMode="numeric"
+                            value={row.baseCount}
+                            onChange={(e) => patch(idx, { baseCount: e.target.value })}
+                            placeholder={`1 ${row.unitText.trim()} = kaç adet? *`}
+                            title="Bu paket kaç tek birim içerir (1 koli = 24 adet). Her ürünün kolisi farklı olabilir."
+                            className={`${field} nums text-xs border-ember/60`}
+                          />
+                        )}
+                      </div>
                     ) : (
                       <select
                         value={row.unitChoice}
@@ -335,6 +369,15 @@ export function NewPurchaseForm({
                     >
                       ✕
                     </button>
+                  </div>
+                  {showPerBase && (
+                    <p className="px-1 text-[11px] text-muted">
+                      1 {row.unitText.trim() || "paket"} = {baseCount} adet · birim başı{" "}
+                      <span className="nums font-medium text-ink-soft">
+                        {formatKurus(Math.round(rowPrice! / baseCount!))}
+                      </span>
+                    </p>
+                  )}
                   </div>
                 );
               })}

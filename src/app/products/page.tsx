@@ -96,7 +96,7 @@ export default async function ProductsPage() {
         <NewProductForm suppliers={suppliers} />
       </Card>
 
-      <ProductList products={details} />
+      <ProductList products={details} allSuppliers={suppliers} />
     </>
   );
 }

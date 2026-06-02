@@ -38,6 +38,19 @@ export default async function PurchasesPage() {
     }),
   ]);
 
+  // Her (toptancı, birim) için o toptancının EN SON fiyatı (alış ya da elle).
+  // Alış formunda otomatik dolan fiyat global değil, seçilen toptancının kendi fiyatı olsun.
+  const priceHist = await prisma.priceHistory.findMany({
+    where: { supplierId: { not: null } },
+    orderBy: { effectiveDate: "desc" },
+    select: { supplierId: true, productPackageId: true, unitPrice: true },
+  });
+  const lastBySupplierPkg = new Map<string, number>();
+  for (const h of priceHist) {
+    const key = `${h.supplierId}:${h.productPackageId}`;
+    if (!lastBySupplierPkg.has(key)) lastBySupplierPkg.set(key, h.unitPrice);
+  }
+
   // Bir toptancının kataloğu = o toptancıdan daha önce alınan ürünler
   // ∪ o toptancıya atanmış (defaultSupplier) ürünler.
   const supplierProductIds: Record<string, Set<string>> = {};
@@ -67,7 +80,8 @@ export default async function PurchasesPage() {
         units: p.packages.map((pkg) => ({
           packageId: pkg.id,
           unit: pkg.name,
-          lastPrice: pkg.lastUnitPrice,
+          // Bu toptancının bu birimdeki son fiyatı; yoksa global son fiyata düş.
+          lastPrice: lastBySupplierPkg.get(`${sid}:${pkg.id}`) ?? pkg.lastUnitPrice,
         })),
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "tr"));

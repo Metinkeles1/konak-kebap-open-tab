@@ -42,7 +42,13 @@ function priceLabel(p: ProductDetail): string {
   return min === max ? formatKurus(min) : `${formatKurus(min)} – ${formatKurus(max)}`;
 }
 
-export function ProductList({ products }: { products: ProductDetail[] }) {
+export function ProductList({
+  products,
+  allSuppliers,
+}: {
+  products: ProductDetail[];
+  allSuppliers: { id: string; name: string }[];
+}) {
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -151,7 +157,11 @@ export function ProductList({ products }: { products: ProductDetail[] }) {
       </div>
 
       {openProduct && (
-        <ProductModal product={openProduct} onClose={() => setOpenId(null)} />
+        <ProductModal
+          product={openProduct}
+          allSuppliers={allSuppliers}
+          onClose={() => setOpenId(null)}
+        />
       )}
     </>
   );

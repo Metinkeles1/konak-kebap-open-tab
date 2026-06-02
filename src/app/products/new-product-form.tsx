@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useRef, useState } from "react";
 import { createProduct } from "@/app/actions";
 import { inputClass } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
+import { isPackagingUnit } from "@/lib/units";
 
 // Alış birimi önerileri (sınırlayıcı değil — istediğini yazabilirsin)
 const UNIT_SUGGESTIONS = ["Adet", "Koli", "Kasa", "Paket", "Balya", "Kg", "Gram", "Litre", "ML", "Çuval", "Teneke", "Rulo"];
@@ -16,10 +17,14 @@ export function NewProductForm({
   suppliers: { id: string; name: string }[];
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+  const [unit, setUnit] = useState(""); // alış birimi — paketse içindeki adet sorulur
   const [state, action] = useActionState(
     async (_prev: State, fd: FormData): Promise<State> => {
       try {
         await createProduct(fd);
+        // Başarılı eklemede formu temizle (uncontrolled alanlar + birim state'i)
+        formRef.current?.reset();
+        setUnit("");
         return { error: null, ok: Date.now() };
       } catch (e) {
         return { error: e instanceof Error ? e.message : "Hata oluştu", ok: 0 };
@@ -28,11 +33,6 @@ export function NewProductForm({
     { error: null, ok: 0 },
   );
 
-  // Başarılı eklemede formu temizle
-  useEffect(() => {
-    if (state.ok) formRef.current?.reset();
-  }, [state.ok]);
-
   const label = "flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted";
 
   return (
@@ -40,13 +40,13 @@ export function NewProductForm({
       <form
         ref={formRef}
         action={action}
-        className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[2fr_1.5fr_1.3fr_1fr_auto] lg:items-end"
+        className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end"
       >
-        <label className={label}>
+        <label className={`${label} sm:min-w-45 sm:flex-2`}>
           Ürün adı
           <input name="name" required placeholder="ör. Dana Kıyma" className={inputClass} />
         </label>
-        <label className={label}>
+        <label className={`${label} sm:min-w-35 sm:flex-1`}>
           Toptancı
           <select name="supplierId" defaultValue="" className={inputClass}>
             <option value="">Opsiyonel</option>
@@ -57,11 +57,32 @@ export function NewProductForm({
             ))}
           </select>
         </label>
-        <label className={label}>
+        <label className={`${label} sm:min-w-30 sm:flex-1`}>
           Alış birimi
-          <input name="unit" list="unit-suggestions" placeholder="Koli, Kg, Balya…" className={inputClass} />
+          <input
+            name="unit"
+            list="unit-suggestions"
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            placeholder="Koli, Kg, Balya…"
+            className={inputClass}
+          />
         </label>
-        <label className={label}>
+        {/* İçindeki adet yalnızca Koli/Kasa gibi paket birimlerde sorulur */}
+        {isPackagingUnit(unit) && (
+          <label className={`${label} sm:min-w-30 sm:flex-1`}>
+            1 {unit.trim()} = kaç adet?
+            <input
+              name="quantityInBase"
+              type="number"
+              min="1"
+              placeholder="ör. 24"
+              title="Bu paket kaç tek birim içerir. Her ürünün kolisi farklı olabilir. Boş = 1."
+              className={inputClass}
+            />
+          </label>
+        )}
+        <label className={`${label} sm:min-w-28 sm:flex-1`}>
           Fiyat (TL)
           <input name="price" inputMode="decimal" placeholder="Opsiyonel" className={inputClass} />
         </label>
