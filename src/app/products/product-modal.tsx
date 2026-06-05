@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 import { formatKurus } from "@/lib/money";
 import { formatDate } from "@/lib/format";
@@ -9,6 +9,9 @@ import {
   deleteProduct,
   updateSupplierPackagePrice,
   setDefaultSupplier,
+  updatePackage,
+  deletePackage,
+  renameProduct,
 } from "@/app/actions";
 import { Badge, inputClass } from "@/components/ui";
 import { SubmitButton, DeleteButton } from "@/components/form";
@@ -205,24 +208,90 @@ function UnitCard({
   const showCheapest = priced.length > 1;
   // Bu birimde henüz fiyatı olmayan toptancılar (eklenebilir).
   const unpriced = allSuppliers.filter((s) => !unit.cells[s.id]);
+  const [editing, setEditing] = useState(false);
 
   return (
     <section className="rounded-card border border-line bg-surface shadow-card">
       <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line px-4 py-3">
-        <h3 className="text-sm font-semibold tracking-tight text-ink">
-          {unit.name}
-          <span className="ml-1.5 text-xs font-normal text-muted">
-            {unit.quantityInBase} {baseUnit}
-          </span>
-        </h3>
-        {cheapestPrice != null && showCheapest && (
-          <span className="text-xs text-muted">
-            en ucuz{" "}
-            <span className="font-semibold text-credit">
-              {formatKurus(cheapestPrice)}
-            </span>{" "}
-            · {priced[0].supplier.name}
-          </span>
+        {editing ? (
+          // Birim adı / içindeki adet düzeltme
+          <form
+            action={updatePackage}
+            onSubmit={() => setEditing(false)}
+            className="flex flex-1 flex-wrap items-center gap-1.5"
+          >
+            <input type="hidden" name="packageId" value={unit.packageId} />
+            <input
+              name="name"
+              required
+              defaultValue={unit.name}
+              aria-label="Birim adı"
+              className={`${inputClass} w-32`}
+            />
+            <input
+              name="quantityInBase"
+              type="number"
+              min="1"
+              defaultValue={unit.quantityInBase}
+              title={`Kaç ${baseUnit}'e denk`}
+              aria-label={`Kaç ${baseUnit}`}
+              className={`${inputClass} w-20`}
+            />
+            <span className="text-xs text-muted">{baseUnit}</span>
+            <SubmitButton variant="ghost" className="px-2.5! py-1! text-xs!">
+              Kaydet
+            </SubmitButton>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded-md px-1.5 py-1 text-xs text-muted transition-colors hover:text-ink"
+              aria-label="Vazgeç"
+            >
+              ✕
+            </button>
+          </form>
+        ) : (
+          <>
+            <h3 className="text-sm font-semibold tracking-tight text-ink">
+              {unit.name}
+              <span className="ml-1.5 text-xs font-normal text-muted">
+                {unit.quantityInBase} {baseUnit}
+              </span>
+            </h3>
+            <div className="flex items-center gap-2">
+              {cheapestPrice != null && showCheapest && (
+                <span className="text-xs text-muted">
+                  en ucuz{" "}
+                  <span className="font-semibold text-credit">
+                    {formatKurus(cheapestPrice)}
+                  </span>{" "}
+                  · {priced[0].supplier.name}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                title="Birimi düzenle"
+              >
+                Düzenle
+              </button>
+              <form
+                action={deletePackage}
+                onSubmit={(e) => {
+                  if (
+                    !confirm(
+                      `"${unit.name}" birimini silmek istediğinize emin misiniz? Geçmiş alışlar etkilenmez.`,
+                    )
+                  )
+                    e.preventDefault();
+                }}
+              >
+                <input type="hidden" name="packageId" value={unit.packageId} />
+                <DeleteButton label="Birimi sil" />
+              </form>
+            </div>
+          </>
         )}
       </header>
 
@@ -308,6 +377,21 @@ export function ProductModal({
 
   const { suppliers, units } = product;
 
+  // Ürün adı düzenleme — çakışma (aynı isim) hatasını modal içinde göster.
+  const [editingName, setEditingName] = useState(false);
+  const [renameState, renameAction] = useActionState(
+    async (_prev: { error: string | null }, fd: FormData) => {
+      try {
+        await renameProduct(fd);
+        setEditingName(false);
+        return { error: null };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "Hata oluştu" };
+      }
+    },
+    { error: null },
+  );
+
   // Tüm birim/toptancı seçenekleri içinde EN UCUZ birim başı (₺/baz birim) hangisi?
   // Koli vs Adet gibi farklı paketleri adil kıyaslar; "neyi kimden alayım"ı yanıtlar.
   let best: { perBase: number; supplierName: string; unitName: string } | null = null;
@@ -336,10 +420,48 @@ export function ProductModal({
       >
         {/* Başlık */}
         <header className="flex items-start justify-between gap-4 border-b border-line px-6 py-4">
-          <div className="min-w-0">
-            <h2 className="font-display text-xl font-semibold tracking-tight text-ink">
-              {product.name}
-            </h2>
+          <div className="min-w-0 flex-1">
+            {editingName ? (
+              <form action={renameAction} className="flex flex-wrap items-center gap-1.5">
+                <input type="hidden" name="productId" value={product.id} />
+                <input
+                  name="name"
+                  required
+                  defaultValue={product.name}
+                  autoFocus
+                  aria-label="Ürün adı"
+                  className={`${inputClass} flex-1 text-lg font-semibold`}
+                />
+                <SubmitButton variant="ghost" className="px-3! py-1.5! text-xs!">
+                  Kaydet
+                </SubmitButton>
+                <button
+                  type="button"
+                  onClick={() => setEditingName(false)}
+                  className="rounded-md px-2 py-1 text-xs text-muted transition-colors hover:text-ink"
+                  aria-label="Vazgeç"
+                >
+                  ✕
+                </button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h2 className="font-display text-xl font-semibold tracking-tight text-ink">
+                  {product.name}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setEditingName(true)}
+                  className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                  title="Ürün adını düzenle"
+                >
+                  Düzenle
+                </button>
+              </div>
+            )}
+            {renameState.error && (
+              <p className="mt-1.5 text-xs text-debt">{renameState.error}</p>
+            )}
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <Badge tone="neutral">{product.baseUnit}</Badge>
               <span className="text-xs text-muted">
@@ -447,7 +569,17 @@ export function ProductModal({
 
           {/* Tehlikeli: ürünü sil */}
           <div className="flex justify-end border-t border-line pt-4">
-            <form action={deleteProduct}>
+            <form
+              action={deleteProduct}
+              onSubmit={(e) => {
+                if (
+                  !confirm(
+                    `"${product.name}" ürününü tüm birimleriyle silmek istediğinize emin misiniz?`,
+                  )
+                )
+                  e.preventDefault();
+              }}
+            >
               <input type="hidden" name="id" value={product.id} />
               <DeleteButton label="Ürünü sil" />
             </form>

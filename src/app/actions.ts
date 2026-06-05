@@ -31,6 +31,9 @@ export async function createSupplier(fd: FormData) {
   await prisma.supplier.create({ data });
   revalidatePath("/suppliers");
   revalidatePath("/");
+  // Yeni toptancı ürün/alış formlarındaki seçim listelerinde de hemen görünsün.
+  revalidatePath("/products");
+  revalidatePath("/purchases");
 }
 
 // Açılış/devir bakiyesini güncelle (TL girilir, kuruşa çevrilir).
@@ -57,6 +60,9 @@ export async function deleteSupplier(fd: FormData) {
   });
   revalidatePath("/suppliers");
   revalidatePath("/");
+  // Silinen toptancı ürün/alış formlarındaki seçim listelerinden de düşsün.
+  revalidatePath("/products");
+  revalidatePath("/purchases");
 }
 
 // --- Ödeme ---
@@ -225,6 +231,54 @@ export async function addPackage(fd: FormData) {
     lastUnitPrice: priceTl ? tlToKurus(priceTl) : undefined,
   });
   await prisma.productPackage.create({ data: { ...data, productId } });
+  revalidatePath("/products");
+  revalidatePath("/purchases");
+}
+
+// Bir alış biriminin adını ve içindeki baz birim sayısını DÜZELT (yanlış girilmişse).
+// Fiyatlar değişmez; sadece etiket/oran düzeltilir.
+export async function updatePackage(fd: FormData) {
+  const packageId = str(fd, "packageId");
+  const name = str(fd, "name");
+  if (!packageId || !name) return;
+  const qib = normQib(Number(str(fd, "quantityInBase") ?? "1"));
+  await prisma.productPackage.update({
+    where: { id: packageId },
+    data: { name, quantityInBase: qib },
+  });
+  revalidatePath("/products");
+  revalidatePath("/purchases");
+}
+
+// Yanlış eklenen bir alış birimini sil (soft delete). Geçmiş alışlar bu birime
+// referans verdiği için kayıt silinmez, yalnızca `deletedAt` set edilir; böylece
+// eski alışlar bozulmaz ama aktif listelerden ve formlardan düşer.
+export async function deletePackage(fd: FormData) {
+  const packageId = str(fd, "packageId");
+  if (!packageId) return;
+  await prisma.productPackage.update({
+    where: { id: packageId },
+    data: { deletedAt: new Date() },
+  });
+  revalidatePath("/products");
+  revalidatePath("/purchases");
+}
+
+// Yanlış girilen ürün adını düzelt. Aynı isimli başka bir aktif ürün varsa engelle.
+export async function renameProduct(fd: FormData) {
+  const productId = str(fd, "productId");
+  const name = str(fd, "name");
+  if (!productId || !name) return;
+  const dup = await prisma.product.findFirst({
+    where: {
+      id: { not: productId },
+      name: { equals: name, mode: "insensitive" },
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+  if (dup) throw new Error(`"${name}" adında başka bir ürün zaten var.`);
+  await prisma.product.update({ where: { id: productId }, data: { name } });
   revalidatePath("/products");
   revalidatePath("/purchases");
 }
