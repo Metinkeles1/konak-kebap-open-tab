@@ -122,7 +122,20 @@ export default async function PurchasesPage() {
 
   return (
     <>
-      <PageHeader title="Alışlar" subtitle={`Son ${purchases.length} kayıt`} />
+      <PageHeader
+        title="Alışlar"
+        subtitle={`Son ${purchases.length} kayıt`}
+        action={
+          ready ? (
+            <Link
+              href="/purchases/sayim"
+              className="rounded-lg bg-ember px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-ember-bright"
+            >
+              Sayım modu
+            </Link>
+          ) : undefined
+        }
+      />
 
       {!ready ? (
         <div className="mb-6 rounded-card border border-ember/30 bg-ember-soft px-5 py-4 text-sm text-ink">
