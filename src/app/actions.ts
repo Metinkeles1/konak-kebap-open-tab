@@ -602,20 +602,28 @@ export async function createPurchase(input: {
         items: { create: resolved },
       },
     });
+    // Fiyat geçmişini tek sorguda yaz (kalem başına ayrı INSERT, çok kalemli
+    // alışta transaction'ı yavaşlatıp zaman aşımına sokuyordu — bkz. timeout).
+    await tx.priceHistory.createMany({
+      data: resolved.map((item) => ({
+        productPackageId: item.productPackageId,
+        supplierId: input.supplierId,
+        unitPrice: item.unitPrice,
+        source: "PURCHASE" as const,
+      })),
+    });
+    // Her birimin son fiyatı farklı olabildiğinden son fiyatları tek tek güncelle.
     for (const item of resolved) {
-      await tx.priceHistory.create({
-        data: {
-          productPackageId: item.productPackageId,
-          supplierId: input.supplierId,
-          unitPrice: item.unitPrice,
-          source: "PURCHASE",
-        },
-      });
       await tx.productPackage.update({
         where: { id: item.productPackageId },
         data: { lastUnitPrice: item.unitPrice },
       });
     }
+  }, {
+    // Çok kalemli alış + uzak Neon'a onlarca gidiş-dönüş varsayılan 5 sn'yi
+    // aşabiliyor; soğuk başlangıca da pay bırakacak şekilde cömert tutuyoruz.
+    timeout: 30_000,
+    maxWait: 10_000,
   });
 
   revalidatePath("/purchases");
@@ -726,6 +734,10 @@ export async function updatePurchase(input: {
         date: input.date ? new Date(input.date) : undefined,
       },
     });
+  }, {
+    // Çok kalemli düzenleme + uzak Neon gidiş-dönüşleri varsayılan 5 sn'yi aşabilir.
+    timeout: 30_000,
+    maxWait: 10_000,
   });
 
   revalidatePath("/purchases");
