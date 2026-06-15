@@ -62,7 +62,10 @@ export default async function ProductsPage() {
         quantityInBase: pkg.quantityInBase,
         lastUnitPrice: pkg.lastUnitPrice,
         cells,
-        history: pkg.priceHistory.map((h) => ({
+        // Modal'daki "Fiyat geçmişi" listesi için yalnızca son 12 kaydı client'a
+        // gönder. Matris hücreleri (cells) yukarıda TÜM geçmişten hesaplandığı için
+        // doğruluk korunur; sadece tarayıcıya giden/serileşen veri sınırlanır.
+        history: pkg.priceHistory.slice(0, 12).map((h) => ({
           id: h.id,
           date: h.effectiveDate.toISOString(),
           price: h.unitPrice,

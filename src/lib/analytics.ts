@@ -122,7 +122,22 @@ export async function getPriceAlerts({
   sinceDays = 60,
   limit = 8,
 }: { thresholdPct?: number; sinceDays?: number; limit?: number } = {}): Promise<PriceAlert[]> {
+  const since = new Date();
+  since.setDate(since.getDate() - sinceDays);
+
+  // Uyarı yalnızca SON fiyat değişimi `since`'ten yeni olan birimlerden çıkabilir.
+  // Önce yakın zamanda fiyatı değişen birimleri bul, ağır geçmiş sorgusunu yalnızca
+  // o birimlerle sınırla (durağan birimlerin tüm geçmişini taramaktan kaçın).
+  const recentlyChanged = await prisma.priceHistory.findMany({
+    where: { effectiveDate: { gte: since } },
+    select: { productPackageId: true },
+    distinct: ["productPackageId"],
+  });
+  const changedPkgIds = recentlyChanged.map((r) => r.productPackageId);
+  if (!changedPkgIds.length) return [];
+
   const history = await prisma.priceHistory.findMany({
+    where: { productPackageId: { in: changedPkgIds } },
     orderBy: { effectiveDate: "asc" },
     select: {
       unitPrice: true,
@@ -139,9 +154,6 @@ export async function getPriceAlerts({
     if (list) list.push(h);
     else byPkg.set(h.productPackageId, [h]);
   }
-
-  const since = new Date();
-  since.setDate(since.getDate() - sinceDays);
 
   const alerts: PriceAlert[] = [];
   for (const list of byPkg.values()) {
@@ -173,18 +185,22 @@ export type SupplierWithBalance = {
 
 /** Tüm toptancılar + bakiyeleri (borç çoktan aza). */
 export async function getSuppliersWithBalance(): Promise<SupplierWithBalance[]> {
-  // Önceden toptancı başına 3 sorgu (N+1) atılıyordu. Artık 3 sabit sorgu:
-  // toptancılar + tüm alış kalemleri + ödeme toplamları; gruplama bellekte.
-  const [suppliers, purchaseItems, paymentGroups] = await Promise.all([
+  // 3 sabit sorgu: toptancılar + toptancı bazında alış toplamı + ödeme toplamı.
+  // Alış toplamı artık tüm PurchaseItem satırlarını belleğe çekmek yerine DB'de
+  // GROUP BY ile toplanır (zamanla sınırsız büyüyen satır transferini önler).
+  const [suppliers, purchaseGroups, paymentGroups] = await Promise.all([
     prisma.supplier.findMany({
       where: { deletedAt: null },
       orderBy: { name: "asc" },
       select: { id: true, name: true, phone: true, openingBalance: true },
     }),
-    prisma.purchaseItem.findMany({
-      where: { purchase: { deletedAt: null, supplier: { deletedAt: null } } },
-      select: { lineTotal: true, purchase: { select: { supplierId: true } } },
-    }),
+    prisma.$queryRaw<{ supplierId: string; total: number }[]>`
+      SELECT pur."supplierId" AS "supplierId", SUM(pi."lineTotal")::float8 AS total
+      FROM "PurchaseItem" pi
+      JOIN "Purchase" pur ON pur.id = pi."purchaseId"
+      WHERE pur."deletedAt" IS NULL
+      GROUP BY pur."supplierId"
+    `,
     prisma.payment.groupBy({
       by: ["supplierId"],
       where: { deletedAt: null, supplier: { deletedAt: null } },
@@ -193,9 +209,8 @@ export async function getSuppliersWithBalance(): Promise<SupplierWithBalance[]> 
   ]);
 
   const purchasedBySupplier = new Map<string, number>();
-  for (const it of purchaseItems) {
-    const sid = it.purchase.supplierId;
-    purchasedBySupplier.set(sid, (purchasedBySupplier.get(sid) ?? 0) + it.lineTotal);
+  for (const g of purchaseGroups) {
+    purchasedBySupplier.set(g.supplierId, Math.round(g.total));
   }
   const paidBySupplier = new Map<string, number>();
   for (const g of paymentGroups) {
@@ -267,40 +282,48 @@ export type PriceTrend = {
 
 /** En çok zamlanan alış birimleri (fiyat geçmişine göre). */
 export async function getPriceTrends(limit = 5): Promise<PriceTrend[]> {
+  // Ağır geçmiş sorgusunda yalnızca fiyat+birim id'si çekilir; ürün/birim adını
+  // her satır için join etmek (binlerce satırda tekrarlanan metin) yerine adlar
+  // sıralama sonrası SADECE ilk N birim için ayrı bir sorguyla alınır.
   const history = await prisma.priceHistory.findMany({
     orderBy: { effectiveDate: "asc" },
-    select: {
-      unitPrice: true,
-      productPackageId: true,
-      package: {
-        select: { name: true, product: { select: { name: true } } },
-      },
-    },
+    select: { unitPrice: true, productPackageId: true },
   });
 
-  const byPackage = new Map<
-    string,
-    { productName: string; packageName: string; series: number[] }
-  >();
+  const byPackage = new Map<string, number[]>();
   for (const h of history) {
-    const cur =
-      byPackage.get(h.productPackageId) ?? {
-        productName: h.package.product.name,
-        packageName: h.package.name,
-        series: [],
-      };
-    cur.series.push(h.unitPrice);
-    byPackage.set(h.productPackageId, cur);
+    const series = byPackage.get(h.productPackageId);
+    if (series) series.push(h.unitPrice);
+    else byPackage.set(h.productPackageId, [h.unitPrice]);
   }
 
-  return [...byPackage.values()]
-    .filter((p) => p.series.length >= 2)
-    .map((p) => {
-      const firstPrice = p.series[0];
-      const lastPrice = p.series[p.series.length - 1];
+  const ranked = [...byPackage.entries()]
+    .filter(([, series]) => series.length >= 2)
+    .map(([packageId, series]) => {
+      const firstPrice = series[0];
+      const lastPrice = series[series.length - 1];
       const pct = firstPrice ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
-      return { ...p, firstPrice, lastPrice, pct };
+      return { packageId, series, firstPrice, lastPrice, pct };
     })
     .sort((a, b) => b.pct - a.pct)
     .slice(0, limit);
+  if (!ranked.length) return [];
+
+  const packages = await prisma.productPackage.findMany({
+    where: { id: { in: ranked.map((r) => r.packageId) } },
+    select: { id: true, name: true, product: { select: { name: true } } },
+  });
+  const pkgInfo = new Map(packages.map((p) => [p.id, p]));
+
+  return ranked.map((r) => {
+    const info = pkgInfo.get(r.packageId);
+    return {
+      productName: info?.product.name ?? "—",
+      packageName: info?.name ?? "—",
+      series: r.series,
+      firstPrice: r.firstPrice,
+      lastPrice: r.lastPrice,
+      pct: r.pct,
+    };
+  });
 }

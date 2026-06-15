@@ -6,7 +6,10 @@ import { PurchaseList } from "./purchase-list";
 import type { ListPurchase, ProductOpt } from "./edit-purchase-form";
 
 export default async function PurchasesPage() {
-  const [suppliers, products, purchases, histItems] = await Promise.all([
+  // Her (toptancı, birim) için o toptancının EN SON fiyatı, tek sorguda.
+  // Eskiden TÜM PriceHistory tablosu belleğe çekilip elenirdi (zamanla sınırsız
+  // büyür). DISTINCT ON ile DB her grup için yalnızca en güncel satırı döndürür.
+  const [suppliers, products, purchases, latestPrices] = await Promise.all([
     prisma.supplier.findMany({
       where: { deletedAt: null },
       orderBy: { name: "asc" },
@@ -28,39 +31,38 @@ export default async function PurchasesPage() {
         items: { include: { package: { include: { product: true } } } },
       },
     }),
-    // Katalog için: hangi üründen hangi toptancıdan alınmış (tüm geçmiş)
-    prisma.purchaseItem.findMany({
-      where: { purchase: { deletedAt: null } },
-      select: {
-        purchase: { select: { supplierId: true } },
-        package: { select: { productId: true } },
-      },
-    }),
+    prisma.$queryRaw<
+      { supplierId: string; productPackageId: string; unitPrice: number }[]
+    >`
+      SELECT DISTINCT ON ("supplierId", "productPackageId")
+        "supplierId", "productPackageId", "unitPrice"
+      FROM "PriceHistory"
+      WHERE "supplierId" IS NOT NULL
+      ORDER BY "supplierId", "productPackageId", "effectiveDate" DESC
+    `,
   ]);
 
-  // Her (toptancı, birim) için o toptancının EN SON fiyatı (alış ya da elle).
-  // Alış formunda otomatik dolan fiyat global değil, seçilen toptancının kendi fiyatı olsun.
-  const priceHist = await prisma.priceHistory.findMany({
-    where: { supplierId: { not: null } },
-    orderBy: { effectiveDate: "desc" },
-    select: { supplierId: true, productPackageId: true, unitPrice: true },
-  });
-  const lastBySupplierPkg = new Map<string, number>();
-  for (const h of priceHist) {
-    const key = `${h.supplierId}:${h.productPackageId}`;
-    if (!lastBySupplierPkg.has(key)) lastBySupplierPkg.set(key, h.unitPrice);
+  const productById = new Map(products.map((p) => [p.id, p]));
+  // Birim (paket) → ürün eşlemesi: hangi fiyat hangi ürüne ait, hızlı bulunsun.
+  const pkgToProductId = new Map<string, string>();
+  for (const p of products) {
+    for (const pkg of p.packages) pkgToProductId.set(pkg.id, p.id);
   }
 
-  // Bir toptancının kataloğu = o toptancıdan daha önce alınan ürünler
-  // ∪ o toptancıya atanmış (defaultSupplier) ürünler.
+  // Tek geçişte hem (toptancı,birim)→son fiyat hem de toptancı→ürün kataloğu kur.
+  // Bir toptancının kataloğu = o toptancının fiyatı olan (alış ya da elle) ürünler
+  // ∪ o toptancıya atanmış (defaultSupplier) ürünler. Böylece ayrı bir "tüm alış
+  // kalemleri" taraması (histItems) gerekmez.
+  const lastBySupplierPkg = new Map<string, number>();
   const supplierProductIds: Record<string, Set<string>> = {};
-  for (const it of histItems) {
-    (supplierProductIds[it.purchase.supplierId] ??= new Set()).add(it.package.productId);
+  for (const h of latestPrices) {
+    lastBySupplierPkg.set(`${h.supplierId}:${h.productPackageId}`, h.unitPrice);
+    const productId = pkgToProductId.get(h.productPackageId);
+    if (productId) (supplierProductIds[h.supplierId] ??= new Set()).add(productId);
   }
   for (const p of products) {
     if (p.defaultSupplierId) (supplierProductIds[p.defaultSupplierId] ??= new Set()).add(p.id);
   }
-  const productById = new Map(products.map((p) => [p.id, p]));
 
   const catalog: Record<
     string,

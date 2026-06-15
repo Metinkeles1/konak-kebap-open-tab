@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { formatKurus } from "@/lib/money";
+import { isPackagingUnit } from "@/lib/units";
 import { inputClass, EmptyState } from "@/components/ui";
 import { ProductModal } from "./product-modal";
 
@@ -31,16 +32,6 @@ export type ProductDetail = {
 };
 
 const lc = (s: string) => s.trim().toLocaleLowerCase("tr");
-
-function priceLabel(p: ProductDetail): string {
-  const prices = p.units
-    .map((u) => u.lastUnitPrice)
-    .filter((v): v is number => v != null);
-  if (!prices.length) return "—";
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
-  return min === max ? formatKurus(min) : `${formatKurus(min)} – ${formatKurus(max)}`;
-}
 
 export function ProductList({
   products,
@@ -106,8 +97,8 @@ export function ProductList({
               <tr className="border-b border-line text-left text-[11px] uppercase tracking-wider text-muted">
                 <th className="px-5 py-3 font-medium">Ürün</th>
                 <th className="px-5 py-3 font-medium">Birimler</th>
+                <th className="px-5 py-3 text-right font-medium">Birim fiyatı</th>
                 <th className="px-5 py-3 text-right font-medium">Toptancı</th>
-                <th className="px-5 py-3 text-right font-medium">Fiyat</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -127,27 +118,72 @@ export function ProductList({
                       </span>
                     )}
                   </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex flex-wrap gap-1">
-                      {p.units.length === 0 ? (
-                        <span className="text-muted">—</span>
-                      ) : (
-                        p.units.map((u) => (
-                          <span
-                            key={u.packageId}
-                            className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] text-ink-soft"
-                          >
-                            {u.name}
-                          </span>
-                        ))
-                      )}
-                    </div>
+                  <td className="px-5 py-3.5 align-top">
+                    {p.units.length === 0 ? (
+                      <span className="text-muted">—</span>
+                    ) : (
+                      <div className="flex flex-col items-start gap-1">
+                        {p.units.map((u) => {
+                          // Koli/Kasa gibi paket birimlerde içindeki adet listede
+                          // doğrudan görünsün (1 ise muhtemelen girilmemiş → fark edilsin).
+                          const showQty = isPackagingUnit(u.name);
+                          return (
+                            <span
+                              key={u.packageId}
+                              className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] text-ink-soft"
+                            >
+                              {u.name}
+                              {showQty && (
+                                <span className="ml-1 text-muted">
+                                  · {u.quantityInBase}{" "}
+                                  {p.baseUnit.toLocaleLowerCase("tr")}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </td>
+                  {/* Fiyatlar Birimler sütunuyla satır satır hizalı; birim adı
+                      tekrar edilmez, yalnızca tutar gösterilir. */}
+                  <td className="px-5 py-3.5 text-right align-top">
+                    {p.units.length === 0 ? (
+                      <span className="text-muted">—</span>
+                    ) : (
+                      <div className="flex flex-col items-end gap-1">
+                        {p.units.map((u) => {
+                          // Paket fiyatı (1 Koli/Paket alış fiyatı) + paket birden çok
+                          // baz birim içeriyorsa adet başı fiyat (paket / içindeki adet).
+                          const perBase =
+                            u.lastUnitPrice != null && u.quantityInBase > 1
+                              ? Math.round(u.lastUnitPrice / u.quantityInBase)
+                              : null;
+                          return (
+                            <span
+                              key={u.packageId}
+                              className="flex flex-col items-end border border-transparent py-0.5 leading-tight"
+                            >
+                              <span className="nums text-[11px] font-medium text-ink">
+                                {u.lastUnitPrice != null ? (
+                                  formatKurus(u.lastUnitPrice)
+                                ) : (
+                                  <span className="font-normal text-muted">—</span>
+                                )}
+                              </span>
+                              {perBase != null && (
+                                <span className="nums text-[10px] text-muted">
+                                  {formatKurus(perBase)}/{p.baseUnit.toLocaleLowerCase("tr")}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </td>
                   <td className="nums px-5 py-3.5 text-right text-ink-soft">
                     {p.suppliers.length || "—"}
-                  </td>
-                  <td className="nums px-5 py-3.5 text-right font-medium text-ink">
-                    {priceLabel(p)}
                   </td>
                 </tr>
               ))}
