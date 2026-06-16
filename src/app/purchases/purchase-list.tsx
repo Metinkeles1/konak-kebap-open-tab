@@ -15,10 +15,12 @@ export function PurchaseList({
   purchases,
   suppliers,
   products,
+  catalog,
 }: {
   purchases: ListPurchase[];
   suppliers: { id: string; name: string }[];
   products: ProductOpt[];
+  catalog: Record<string, ProductOpt[]>;
 }) {
   const [query, setQuery] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("");
@@ -109,6 +111,7 @@ export function PurchaseList({
           purchase={openPurchase}
           suppliers={suppliers}
           products={products}
+          catalog={catalog}
           onClose={() => setOpenId(null)}
         />
       )}

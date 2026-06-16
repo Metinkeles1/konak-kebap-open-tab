@@ -15,7 +15,7 @@ export type SupplierBalance = {
 export async function getSupplierBalance(
   supplierId: string,
 ): Promise<SupplierBalance> {
-  const [supplier, purchaseAgg, paymentAgg] = await Promise.all([
+  const [supplier, purchaseAgg, vatAgg, paymentAgg] = await Promise.all([
     prisma.supplier.findUnique({
       where: { id: supplierId },
       select: { openingBalance: true },
@@ -24,6 +24,11 @@ export async function getSupplierBalance(
       _sum: { lineTotal: true },
       where: { purchase: { supplierId, deletedAt: null } },
     }),
+    // KDV başlık düzeyinde tutulur; cari borca dahildir.
+    prisma.purchase.aggregate({
+      _sum: { vatAmount: true },
+      where: { supplierId, deletedAt: null },
+    }),
     prisma.payment.aggregate({
       _sum: { amount: true },
       where: { supplierId, deletedAt: null },
@@ -31,7 +36,9 @@ export async function getSupplierBalance(
   ]);
 
   const openingBalance = supplier?.openingBalance ?? 0;
-  const totalPurchased = purchaseAgg._sum.lineTotal ?? 0;
+  // Toplam alış = kalemler (KDV hariç) + KDV tutarları (KDV dahil borç).
+  const totalPurchased =
+    (purchaseAgg._sum.lineTotal ?? 0) + (vatAgg._sum.vatAmount ?? 0);
   const totalPaid = paymentAgg._sum.amount ?? 0;
 
   return {

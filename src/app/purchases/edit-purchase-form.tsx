@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { updatePurchase, type EditPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
 
@@ -28,7 +28,10 @@ export type ListPurchase = {
   documentNo: string | null;
   note: string | null;
   items: ListItem[];
-  total: number;
+  subtotal: number; // KDV hariç (kalemler toplamı)
+  vatRate: number | null; // KDV oranı (%); null = KDV yok
+  vatAmount: number; // KDV tutarı (kuruş)
+  total: number; // KDV dahil genel toplam
 };
 
 type Row = {
@@ -71,16 +74,20 @@ export function EditPurchaseForm({
   purchase,
   suppliers,
   products,
+  catalog,
   onDone,
 }: {
   purchase: ListPurchase;
   suppliers: { id: string; name: string }[];
   products: ProductOpt[];
+  catalog: Record<string, ProductOpt[]>;
   onDone: () => void;
 }) {
   const [supplierId, setSupplierId] = useState(purchase.supplierId);
   const [date, setDate] = useState(isoToLocal(purchase.date));
   const [note, setNote] = useState(purchase.note ?? "");
+  const [vat, setVat] = useState(purchase.vatRate != null ? String(purchase.vatRate) : "");
+  const [showAll, setShowAll] = useState(false);
   const [rows, setRows] = useState<Row[]>(() =>
     purchase.items.map((it) => ({
       key: nextKey(),
@@ -95,7 +102,18 @@ export function EditPurchaseForm({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  // Tüm ürünler — etiket/fiyat aramaları için (mevcut kalemler dahil her zaman çözülsün).
   const productById = new Map(products.map((p) => [p.productId, p]));
+
+  // Yeni kalem açılır listesi: varsayılan seçili toptancının ürünleri; "Tüm
+  // ürünleri göster" açıksa o toptancıya bağlı olmayanlar da global fiyatıyla eklenir.
+  const productOptions = useMemo<ProductOpt[]>(() => {
+    const scoped = catalog[supplierId] ?? [];
+    if (!showAll) return scoped;
+    const have = new Set(scoped.map((p) => p.productId));
+    const extra = products.filter((p) => !have.has(p.productId));
+    return [...scoped, ...extra].sort((a, b) => a.name.localeCompare(b.name, "tr"));
+  }, [supplierId, showAll, catalog, products]);
 
   function patch(key: string, p: Partial<Row>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
@@ -129,11 +147,18 @@ export function EditPurchaseForm({
     return lastPriceOf(r.packageId, r.productId);
   }
 
-  const total = rows.reduce((s, r) => {
+  const subtotal = rows.reduce((s, r) => {
     const q = toQty(r.quantity);
     const p = rowPrice(r);
     return s + (p != null ? q * p : 0);
   }, 0);
+  // KDV oranı (% tam sayı); boş/0 ise KDV yok.
+  const vatRate = (() => {
+    const n = parseInt(vat.trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
+  const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
+  const total = subtotal + vatAmount;
 
   function save() {
     setError(null);
@@ -155,7 +180,7 @@ export function EditPurchaseForm({
 
     startTransition(async () => {
       try {
-        await updatePurchase({ id: purchase.id, supplierId, date, note, items });
+        await updatePurchase({ id: purchase.id, supplierId, date, note, vatRate, items });
         onDone();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Hata oluştu");
@@ -191,7 +216,18 @@ export function EditPurchaseForm({
         </label>
       </div>
 
-      <div className="mt-4 grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted">
+      <label className="mt-4 flex items-center gap-2 text-xs text-muted">
+        <input
+          type="checkbox"
+          checked={showAll}
+          onChange={(e) => setShowAll(e.target.checked)}
+          className="accent-ember"
+        />
+        Tüm ürünleri göster
+        <span className="text-muted/70">(bu toptancıya bağlı olmayanlar dahil)</span>
+      </label>
+
+      <div className="mt-3 grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted">
         <span>Ürün</span>
         <span>Birim</span>
         <span>Adet</span>
@@ -217,7 +253,7 @@ export function EditPurchaseForm({
                   className={field}
                 >
                   <option value="">Ürün seç…</option>
-                  {products.map((p) => (
+                  {productOptions.map((p) => (
                     <option key={p.productId} value={p.productId}>
                       {p.name}
                     </option>
@@ -286,10 +322,35 @@ export function EditPurchaseForm({
         + Kalem ekle
       </button>
 
-      <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
-        <div className="text-sm text-muted">
-          Toplam <span className="nums ml-1 text-base font-semibold text-ink">{formatKurus(total)}</span>
+      {/* KDV (opsiyonel) + toplam dökümü */}
+      <div className="mt-4 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-end sm:justify-between">
+        <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted">
+          KDV oranı (%)
+          <input
+            inputMode="numeric"
+            value={vat}
+            onChange={(e) => setVat(e.target.value)}
+            placeholder="Opsiyonel (ör. 20)"
+            title="Boş bırak = KDV yok. Tutar ara toplamdan hesaplanır."
+            className={`${field} nums w-40`}
+          />
+        </label>
+        <div className="text-sm sm:text-right">
+          <div className="text-muted">
+            Ara toplam <span className="nums ml-1 text-ink-soft">{formatKurus(subtotal)}</span>
+          </div>
+          {vatAmount > 0 && (
+            <div className="text-muted">
+              KDV %{vatRate} <span className="nums ml-1 text-ink-soft">{formatKurus(vatAmount)}</span>
+            </div>
+          )}
+          <div className="mt-0.5 text-muted">
+            Genel toplam <span className="nums ml-1 text-base font-semibold text-ink">{formatKurus(total)}</span>
+          </div>
         </div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-end border-t border-line pt-4">
         <div className="flex items-center gap-2">
           <button
             type="button"

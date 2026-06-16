@@ -105,6 +105,8 @@ model Purchase {
   date       DateTime  @default(now())
   documentNo String?   // fatura / irsaliye no
   dueDate    DateTime? // vade tarihi
+  vatRate    Int?      // KDV oranı (% — örn. 1, 10, 20); null = KDV girilmedi (opsiyonel)
+  vatAmount  Int       @default(0) // hesaplanan KDV tutarı (kuruş); yazıldığında DONDURULUR
   note       String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt

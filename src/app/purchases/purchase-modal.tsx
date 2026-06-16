@@ -17,11 +17,13 @@ export function PurchaseModal({
   purchase,
   suppliers,
   products,
+  catalog,
   onClose,
 }: {
   purchase: ListPurchase;
   suppliers: { id: string; name: string }[];
   products: ProductOpt[];
+  catalog: Record<string, ProductOpt[]>;
   onClose: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -55,6 +57,7 @@ export function PurchaseModal({
           purchase={purchase}
           suppliers={suppliers}
           products={products}
+          catalog={catalog}
           onDone={() => setEditing(false)}
         />
       ) : (
@@ -87,9 +90,29 @@ export function PurchaseModal({
                 ))}
               </tbody>
               <tfoot>
+                {purchase.vatAmount > 0 && (
+                  <>
+                    <tr className="border-t border-line">
+                      <td colSpan={4} className="px-4 py-1.5 text-right text-xs text-muted">
+                        Ara toplam
+                      </td>
+                      <td className="nums px-4 py-1.5 text-right text-xs text-ink-soft">
+                        {formatKurus(purchase.subtotal)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colSpan={4} className="px-4 py-1.5 text-right text-xs text-muted">
+                        KDV %{purchase.vatRate}
+                      </td>
+                      <td className="nums px-4 py-1.5 text-right text-xs text-ink-soft">
+                        {formatKurus(purchase.vatAmount)}
+                      </td>
+                    </tr>
+                  </>
+                )}
                 <tr className="border-t border-line bg-surface-2/50">
                   <td colSpan={4} className="px-4 py-2.5 text-right text-sm text-muted">
-                    Toplam
+                    {purchase.vatAmount > 0 ? "Genel toplam" : "Toplam"}
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <Money kurus={purchase.total} className="font-semibold" />

@@ -14,6 +14,7 @@ export async function getDashboardStats() {
     productCount,
     openingAgg,
     purchasedAgg,
+    vatAgg,
     paidAgg,
     monthAgg,
     monthPayAgg,
@@ -27,6 +28,11 @@ export async function getDashboardStats() {
     prisma.purchaseItem.aggregate({
       _sum: { lineTotal: true },
       where: { purchase: { deletedAt: null, supplier: { deletedAt: null } } },
+    }),
+    // KDV başlık düzeyinde tutulur; toplam borca dahildir.
+    prisma.purchase.aggregate({
+      _sum: { vatAmount: true },
+      where: { deletedAt: null, supplier: { deletedAt: null } },
     }),
     prisma.payment.aggregate({
       _sum: { amount: true },
@@ -44,7 +50,8 @@ export async function getDashboardStats() {
 
   const totalDebt =
     (openingAgg._sum.openingBalance ?? 0) +
-    (purchasedAgg._sum.lineTotal ?? 0) -
+    (purchasedAgg._sum.lineTotal ?? 0) +
+    (vatAgg._sum.vatAmount ?? 0) -
     (paidAgg._sum.amount ?? 0);
 
   return {
@@ -188,7 +195,7 @@ export async function getSuppliersWithBalance(): Promise<SupplierWithBalance[]> 
   // 3 sabit sorgu: toptancılar + toptancı bazında alış toplamı + ödeme toplamı.
   // Alış toplamı artık tüm PurchaseItem satırlarını belleğe çekmek yerine DB'de
   // GROUP BY ile toplanır (zamanla sınırsız büyüyen satır transferini önler).
-  const [suppliers, purchaseGroups, paymentGroups] = await Promise.all([
+  const [suppliers, purchaseGroups, vatGroups, paymentGroups] = await Promise.all([
     prisma.supplier.findMany({
       where: { deletedAt: null },
       orderBy: { name: "asc" },
@@ -201,6 +208,12 @@ export async function getSuppliersWithBalance(): Promise<SupplierWithBalance[]> 
       WHERE pur."deletedAt" IS NULL
       GROUP BY pur."supplierId"
     `,
+    // KDV başlık düzeyinde (Purchase) tutulduğundan kalem join'ünde değil ayrı toplanır.
+    prisma.purchase.groupBy({
+      by: ["supplierId"],
+      where: { deletedAt: null },
+      _sum: { vatAmount: true },
+    }),
     prisma.payment.groupBy({
       by: ["supplierId"],
       where: { deletedAt: null, supplier: { deletedAt: null } },
@@ -211,6 +224,11 @@ export async function getSuppliersWithBalance(): Promise<SupplierWithBalance[]> 
   const purchasedBySupplier = new Map<string, number>();
   for (const g of purchaseGroups) {
     purchasedBySupplier.set(g.supplierId, Math.round(g.total));
+  }
+  // Alış toplamına KDV'yi ekle (cari borç KDV dahil).
+  for (const g of vatGroups) {
+    const cur = purchasedBySupplier.get(g.supplierId) ?? 0;
+    purchasedBySupplier.set(g.supplierId, cur + (g._sum.vatAmount ?? 0));
   }
   const paidBySupplier = new Map<string, number>();
   for (const g of paymentGroups) {

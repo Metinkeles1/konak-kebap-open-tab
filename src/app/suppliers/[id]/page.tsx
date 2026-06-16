@@ -56,8 +56,9 @@ export default async function SupplierDetailPage({
 
   // Bakiye, zaten çekilmiş olan alış+ödemelerden hesaplanır — ayrıca
   // getSupplierBalance çağırıp 3 toplulaştırma sorgusu daha atmaya gerek yok.
+  // Alış toplamı KDV dahildir (KDV başlık düzeyinde tutulur).
   const totalPurchased = purchases.reduce(
-    (s, p) => s + p.items.reduce((a, i) => a + i.lineTotal, 0),
+    (s, p) => s + p.items.reduce((a, i) => a + i.lineTotal, 0) + p.vatAmount,
     0,
   );
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
@@ -70,16 +71,23 @@ export default async function SupplierDetailPage({
 
   // --- Cari ekstre: açılış + alış (+) + ödeme (−), kronolojik, yürüyen bakiyeli ---
   const txns = [
-    ...purchases.map((p) => ({
-      date: p.date,
-      kind: "purchase" as const,
-      amount: p.items.reduce((s, i) => s + i.lineTotal, 0),
-      documentNo: p.documentNo,
-      sub: p.items
+    ...purchases.map((p) => {
+      const itemsTotal = p.items.reduce((s, i) => s + i.lineTotal, 0);
+      const itemsDesc = p.items
         .map((i) => `${i.package.product.name} · ${i.package.name}×${i.quantity}`)
-        .join(", "),
-      id: p.id,
-    })),
+        .join(", ");
+      return {
+        date: p.date,
+        kind: "purchase" as const,
+        amount: itemsTotal + p.vatAmount, // KDV dahil borç
+        documentNo: p.documentNo,
+        sub:
+          p.vatAmount > 0
+            ? `${itemsDesc} · +KDV %${p.vatRate} (${formatKurus(p.vatAmount)})`
+            : itemsDesc,
+        id: p.id,
+      };
+    }),
     ...payments.map((p) => ({
       date: p.date,
       kind: "payment" as const,

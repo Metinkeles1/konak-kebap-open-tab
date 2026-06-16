@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { createPurchase, type NewPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
 import { isPackagingUnit } from "@/lib/units";
@@ -63,18 +63,33 @@ function nowLocal() {
 export function NewPurchaseForm({
   suppliers,
   catalog,
+  allProducts,
 }: {
   suppliers: SupplierOpt[];
   catalog: Catalog;
+  allProducts: CatalogProduct[];
 }) {
   const [supplierId, setSupplierId] = useState("");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(nowLocal());
+  const [vat, setVat] = useState(""); // KDV oranı (%); boş = KDV yok
   const [rows, setRows] = useState<Row[]>([newRow()]);
   const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const products = supplierId ? catalog[supplierId] ?? [] : [];
+  // Varsayılan: yalnızca seçili toptancının ürünleri. "Tüm ürünleri göster"
+  // açıksa, o toptancıya bağlı olmayan (sahipsiz / başka toptancı) ürünler de
+  // listeye eklenir — global son fiyatlarıyla. Böylece yeni eklenen ürünler de
+  // bulunabilir.
+  const products = useMemo<CatalogProduct[]>(() => {
+    if (!supplierId) return [];
+    const scoped = catalog[supplierId] ?? [];
+    if (!showAll) return scoped;
+    const have = new Set(scoped.map((p) => p.productId));
+    const extra = allProducts.filter((p) => !have.has(p.productId));
+    return [...scoped, ...extra].sort((a, b) => a.name.localeCompare(b.name, "tr"));
+  }, [supplierId, showAll, catalog, allProducts]);
 
   const findProduct = (row: Row) => products.find((p) => p.productId === row.productId);
   function selectedPkg(row: Row): Unit | undefined {
@@ -92,11 +107,18 @@ export function NewPurchaseForm({
     return selectedPkg(row)?.lastPrice ?? null;
   }
 
-  const total = rows.reduce((sum, r) => {
+  const subtotal = rows.reduce((sum, r) => {
     const qty = toQty(r.quantity);
     const price = rowPriceKurus(r);
     return sum + (price != null ? qty * price : 0);
   }, 0);
+  // KDV oranı (% tam sayı); boş/0 ise KDV uygulanmaz.
+  const vatRate = (() => {
+    const n = parseInt(vat.trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
+  const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
+  const total = subtotal + vatAmount;
 
   function patch(idx: number, p: Partial<Row>) {
     setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...p } : r)));
@@ -105,6 +127,7 @@ export function NewPurchaseForm({
   function changeSupplier(id: string) {
     setSupplierId(id);
     setRows([newRow()]);
+    setVat("");
     setError(null);
   }
 
@@ -156,10 +179,11 @@ export function NewPurchaseForm({
 
     startTransition(async () => {
       try {
-        await createPurchase({ supplierId, note, date, items: payload });
+        await createPurchase({ supplierId, note, date, vatRate, items: payload });
         setRows([newRow()]);
         setNote("");
         setDate(nowLocal());
+        setVat("");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Hata oluştu");
       }
@@ -219,6 +243,17 @@ export function NewPurchaseForm({
           </p>
         ) : (
           <>
+            <label className="flex items-center gap-2 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={showAll}
+                onChange={(e) => setShowAll(e.target.checked)}
+                className="accent-ember"
+              />
+              Tüm ürünleri göster
+              <span className="text-muted/70">(bu toptancıya bağlı olmayanlar dahil)</span>
+            </label>
+
             <div className="grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted">
               <span>Ürün</span>
               <span>Birim</span>
@@ -391,15 +426,37 @@ export function NewPurchaseForm({
               + Kalem ekle
             </button>
 
-            <div className="flex items-center justify-between border-t border-line pt-4">
-              <div className="text-sm text-muted">
-                Toplam <span className="nums ml-1 text-lg font-semibold text-ink">{formatKurus(total)}</span>
+            <div className="flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex items-end gap-4">
+                <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted">
+                  KDV (%)
+                  <input
+                    inputMode="numeric"
+                    value={vat}
+                    onChange={(e) => setVat(e.target.value)}
+                    placeholder="Ops. (20)"
+                    title="Opsiyonel. Boş = KDV yok. Tutar ara toplamdan hesaplanır."
+                    className={`${field} nums w-24`}
+                  />
+                </label>
+                <div className="text-sm text-muted">
+                  {vatAmount > 0 && (
+                    <div className="text-[11px]">
+                      Ara toplam <span className="nums text-ink-soft">{formatKurus(subtotal)}</span>
+                      {" · "}KDV %{vatRate} <span className="nums text-ink-soft">{formatKurus(vatAmount)}</span>
+                    </div>
+                  )}
+                  <div>
+                    {vatAmount > 0 ? "Genel toplam" : "Toplam"}{" "}
+                    <span className="nums ml-1 text-lg font-semibold text-ink">{formatKurus(total)}</span>
+                  </div>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={submit}
                 disabled={pending}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {pending && (
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />

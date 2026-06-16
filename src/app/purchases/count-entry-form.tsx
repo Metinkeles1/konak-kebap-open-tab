@@ -55,6 +55,7 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [newRows, setNewRows] = useState<NewRow[]>([]);
   const [filter, setFilter] = useState("");
+  const [vat, setVat] = useState(""); // KDV oranı (%); boş = KDV yok
   const [invoiceTotal, setInvoiceTotal] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -97,6 +98,7 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
     setRows({});
     setNewRows([]);
     setFilter("");
+    setVat("");
     setInvoiceTotal("");
     setError(null);
     setOk(null);
@@ -113,7 +115,15 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
     (s, p) => s + Math.round((priceKurus(rows[p.packageId], p) ?? 0) * toQty(rows[p.packageId].qty)),
     0,
   );
-  const total = catalogTotal + newTotal;
+  const subtotal = catalogTotal + newTotal;
+  // KDV oranı (% tam sayı); boş/0 ise KDV uygulanmaz. İrsaliye toplamı KDV dahil
+  // olduğundan çapraz-kontrol genel toplam (KDV dahil) üzerinden yapılır.
+  const vatRate = (() => {
+    const n = parseInt(vat.trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
+  const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
+  const total = subtotal + vatAmount;
   const itemCount = activeCatalog.length + newRows.filter((r) => toQty(r.qty) > 0 && r.name.trim()).length;
 
   // İrsaliye çapraz-kontrolü
@@ -178,13 +188,14 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
 
     startTransition(async () => {
       try {
-        await createPurchase({ supplierId, note, date, items });
+        await createPurchase({ supplierId, note, date, vatRate, items });
         setRows({});
         setNewRows([]);
         setInvoiceTotal("");
         setNote("");
         setDate(nowLocal());
         setFilter("");
+        setVat("");
         setOk(`Alış kaydedildi · ${items.length} kalem · ${formatKurus(total)}`);
         router.refresh(); // yeni ürünler katalogda görünsün
       } catch (e) {
@@ -413,7 +424,7 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
       {ok && <p className="mt-4 rounded-lg bg-credit-soft px-3 py-2 text-sm text-credit">{ok}</p>}
 
       {/* Alt özet + çapraz-kontrol — responsive */}
-      <div className="sticky bottom-0 z-30 mt-4 rounded-card border border-line bg-surface/95 shadow-pop backdrop-blur">
+      <div className="sticky bottom-0 z-30 mt-4 rounded-card border border-line bg-surface shadow-pop">
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 sm:px-5">
           {/* Toplam */}
           <div className="flex items-baseline gap-2.5">
@@ -421,12 +432,30 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
               <span className="nums font-semibold text-ink">{itemCount}</span> kalem
             </span>
             <span className="text-sm text-muted">·</span>
-            <span className="text-sm text-muted">Toplam</span>
+            <span className="text-sm text-muted">{vatAmount > 0 ? "Genel toplam" : "Toplam"}</span>
             <span className="nums text-xl font-semibold text-ink">{formatKurus(total)}</span>
+            {vatAmount > 0 && (
+              <span className="nums text-[11px] text-muted">
+                ({formatKurus(subtotal)} + KDV %{vatRate} {formatKurus(vatAmount)})
+              </span>
+            )}
+          </div>
+
+          {/* KDV (opsiyonel) */}
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <label className="text-[11px] font-medium uppercase tracking-wider text-muted">KDV %</label>
+            <input
+              inputMode="numeric"
+              value={vat}
+              onChange={(e) => setVat(e.target.value)}
+              placeholder="ops."
+              title="Opsiyonel. Boş = KDV yok. İrsaliye toplamı KDV dahil karşılaştırılır."
+              className={`${field} nums w-16 text-right`}
+            />
           </div>
 
           {/* İrsaliye çapraz-kontrolü */}
-          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+          <div className="flex flex-wrap items-center gap-2">
             <label className="text-[11px] font-medium uppercase tracking-wider text-muted">İrsaliye toplamı</label>
             <input
               inputMode="decimal"

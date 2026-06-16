@@ -463,6 +463,16 @@ const normQib = (n?: number) => {
   return Number.isFinite(v) && v > 0 ? v : 1;
 };
 
+// KDV oranını normalle: pozitif tam sayı (%); yoksa null (KDV uygulanmaz).
+const normVatRate = (n?: number | null): number | null => {
+  const v = Math.round(n ?? 0);
+  return Number.isFinite(v) && v > 0 ? v : null;
+};
+
+// Ara toplamdan (KDV hariç, kuruş) KDV tutarını hesapla; oran yoksa 0.
+const computeVat = (subtotal: number, rate: number | null): number =>
+  rate ? Math.round((subtotal * rate) / 100) : 0;
+
 // Serbest birim etiketini şemadaki Unit enum'una eşle (baseUnit için).
 const UNIT_TO_BASE: Record<string, "ADET" | "LITRE" | "KG" | "ML" | "GR" | "PAKET"> = {
   Adet: "ADET",
@@ -477,6 +487,7 @@ export async function createPurchase(input: {
   supplierId: string;
   note?: string;
   date?: string; // ISO (datetime); boşsa şimdi
+  vatRate?: number; // KDV oranı (%); boş/0 ise KDV uygulanmaz
   items: NewPurchaseItem[];
 }) {
   const items = input.items.filter((i) => {
@@ -593,12 +604,19 @@ export async function createPurchase(input: {
     const count = await tx.purchase.count();
     const documentNo = `ALŞ-${String(count + 1).padStart(4, "0")}`;
 
+    // KDV opsiyonel: ara toplam (kalem tutarları) üzerinden hesaplanıp DONDURULUR.
+    const subtotal = resolved.reduce((s, r) => s + r.lineTotal, 0);
+    const vatRate = normVatRate(input.vatRate);
+    const vatAmount = computeVat(subtotal, vatRate);
+
     await tx.purchase.create({
       data: {
         supplierId: input.supplierId,
         note: input.note,
         date: input.date ? new Date(input.date) : undefined,
         documentNo,
+        vatRate,
+        vatAmount,
         items: { create: resolved },
       },
     });
@@ -651,6 +669,7 @@ export async function updatePurchase(input: {
   supplierId: string;
   date?: string;
   note?: string;
+  vatRate?: number; // KDV oranı (%); boş/0 ise KDV kaldırılır
   items: EditPurchaseItem[];
 }) {
   const purchase = await prisma.purchase.findFirst({
@@ -699,6 +718,11 @@ export async function updatePurchase(input: {
   const keptIds = new Set(resolved.map((r) => r.id).filter(Boolean) as string[]);
   const toDelete = purchase.items.filter((i) => !keptIds.has(i.id)).map((i) => i.id);
 
+  // KDV'yi düzeltilmiş ara toplamdan yeniden hesapla (kalemler değişmiş olabilir).
+  const subtotal = resolved.reduce((s, r) => s + r.lineTotal, 0);
+  const vatRate = normVatRate(input.vatRate);
+  const vatAmount = computeVat(subtotal, vatRate);
+
   await prisma.$transaction(async (tx) => {
     if (toDelete.length) {
       await tx.purchaseItem.deleteMany({ where: { id: { in: toDelete } } });
@@ -732,6 +756,8 @@ export async function updatePurchase(input: {
         supplierId: input.supplierId,
         note: input.note?.trim() ? input.note.trim() : null,
         date: input.date ? new Date(input.date) : undefined,
+        vatRate,
+        vatAmount,
       },
     });
   }, {

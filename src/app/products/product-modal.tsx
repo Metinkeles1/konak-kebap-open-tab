@@ -408,7 +408,7 @@ export function ProductModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-4 backdrop-blur-sm sm:p-8"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-ink/55 p-4 sm:p-8"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

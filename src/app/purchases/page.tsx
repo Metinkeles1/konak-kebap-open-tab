@@ -101,14 +101,19 @@ export default async function PurchasesPage() {
   }));
 
   // Liste/düzenleme için serileştirilebilir alış verisi
-  const clientPurchases: ListPurchase[] = purchases.map((p) => ({
+  const clientPurchases: ListPurchase[] = purchases.map((p) => {
+    const subtotal = p.items.reduce((s, i) => s + i.lineTotal, 0);
+    return {
     id: p.id,
     supplierId: p.supplierId,
     supplierName: p.supplier.name,
     date: p.date.toISOString(),
     documentNo: p.documentNo,
     note: p.note,
-    total: p.items.reduce((s, i) => s + i.lineTotal, 0),
+    subtotal,
+    vatRate: p.vatRate,
+    vatAmount: p.vatAmount,
+    total: subtotal + p.vatAmount, // KDV dahil
     items: p.items.map((i) => ({
       id: i.id,
       productId: i.package.productId,
@@ -118,7 +123,8 @@ export default async function PurchasesPage() {
       quantity: i.quantity,
       unitPrice: i.unitPrice,
     })),
-  }));
+    };
+  });
 
   const ready = suppliers.length > 0;
 
@@ -149,7 +155,7 @@ export default async function PurchasesPage() {
         </div>
       ) : (
         <div className="mb-6">
-          <NewPurchaseForm suppliers={suppliers} catalog={catalog} />
+          <NewPurchaseForm suppliers={suppliers} catalog={catalog} allProducts={allProducts} />
         </div>
       )}
 
@@ -157,6 +163,7 @@ export default async function PurchasesPage() {
         purchases={clientPurchases}
         suppliers={suppliers}
         products={allProducts}
+        catalog={catalog}
       />
     </>
   );

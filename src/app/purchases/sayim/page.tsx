@@ -67,9 +67,21 @@ export default async function SayimPage() {
     const key = `${sid}:${it.productPackageId}`;
     freqCount.set(key, (freqCount.get(key) ?? 0) + 1);
   }
+  // defaultSupplier'ı olan ürünler yalnızca o toptancıda; toptancısı olmayan
+  // ("Opsiyonel" bırakılmış) ürünler hiçbir toptancıya bağlı değildir — bunları
+  // HER toptancının listesine ekle ki sayım modunda görünüp girilebilsinler.
+  const orphanPkgIds: string[] = [];
   for (const p of products) {
     if (p.defaultSupplierId) {
       for (const pkg of p.packages) (supplierPkgIds[p.defaultSupplierId] ??= new Set()).add(pkg.id);
+    } else {
+      for (const pkg of p.packages) orphanPkgIds.push(pkg.id);
+    }
+  }
+  if (orphanPkgIds.length) {
+    for (const s of suppliers) {
+      const set = (supplierPkgIds[s.id] ??= new Set());
+      for (const id of orphanPkgIds) set.add(id);
     }
   }
 

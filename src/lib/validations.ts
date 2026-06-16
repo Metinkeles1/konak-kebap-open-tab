@@ -46,17 +46,21 @@ export const purchaseItemSchema = z.object({
   // gönderilmezse o birimin lastUnitPrice değeri kullanılır
   unitPrice: kurus.optional(),
 });
+// KDV oranı (% tam sayı). Opsiyonel; girilmezse KDV uygulanmaz.
+const vatRate = z.number().int().min(0).max(100);
 export const purchaseCreateSchema = z.object({
   supplierId: z.string().min(1),
   date: z.coerce.date().optional(),
   documentNo: z.string().optional(),
   dueDate: z.coerce.date().optional(),
+  vatRate: vatRate.optional(),
   note: z.string().optional(),
   items: z.array(purchaseItemSchema).min(1, "En az bir kalem gerekli"),
 });
 // Alış kalemleri DONDURULDUĞU için yalnızca başlık alanları güncellenebilir.
 export const purchaseUpdateSchema = z.object({
   date: z.coerce.date().optional(),
+  vatRate: vatRate.optional(),
   note: z.string().optional(),
 });
 

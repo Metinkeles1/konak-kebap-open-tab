@@ -58,12 +58,19 @@ export async function POST(req: Request) {
       };
     });
 
+    // KDV opsiyonel: ara toplam üzerinden hesaplanıp dondurulur.
+    const subtotal = resolvedItems.reduce((s, i) => s + i.lineTotal, 0);
+    const vatRate = data.vatRate && data.vatRate > 0 ? data.vatRate : null;
+    const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
+
     const purchase = await prisma.$transaction(async (tx) => {
       const row = await tx.purchase.create({
         data: {
           supplierId: data.supplierId,
           date: data.date,
           note: data.note,
+          vatRate,
+          vatAmount,
           items: { create: resolvedItems },
         },
         include: { items: true },
