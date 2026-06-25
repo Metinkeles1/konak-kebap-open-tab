@@ -35,11 +35,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} h-full`}
     >
       <body className="h-dvh overflow-hidden">
-        {/* Uygulama kabuğu: sidebar sabit, yalnızca içerik kendi içinde kayar. */}
-        <div className="flex h-dvh">
+        {/* Uygulama kabuğu: masaüstünde sidebar sabit; mobilde üst bar + çekmece.
+            Mobilde kolon (üst bar üstte), masaüstünde satır (sidebar solda). */}
+        <div className="flex h-dvh flex-col lg:flex-row">
           <Sidebar />
           <main className="min-w-0 flex-1 overflow-y-auto overscroll-contain">
-            <div className="stagger mx-auto w-full max-w-425 px-5 py-7 sm:px-8 sm:py-8 2xl:px-12">
+            <div className="stagger mx-auto w-full max-w-425 px-4 py-5 sm:px-8 sm:py-8 2xl:px-12">
               {children}
             </div>
           </main>

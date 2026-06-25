@@ -12,7 +12,7 @@ export default async function SayimPage() {
     prisma.supplier.findMany({
       where: { deletedAt: null },
       orderBy: { name: "asc" },
-      select: { id: true, name: true },
+      select: { id: true, name: true, phone: true },
     }),
     prisma.product.findMany({
       where: { deletedAt: null },

@@ -21,7 +21,7 @@ export type CountPackage = {
   lastPrice: number | null;
   freq: boolean;
 };
-type SupplierOpt = { id: string; name: string };
+type SupplierOpt = { id: string; name: string; phone: string | null };
 type Catalog = Record<string, CountPackage[]>;
 
 type RowState = { qty: string; price: string }; // price boş = son fiyatı kullan
@@ -37,6 +37,28 @@ const toQty = (s: string) => {
   const n = Number(s.trim().replace(",", "."));
   return Number.isFinite(n) && n > 0 ? n : 0;
 };
+const fmtQty = (n: number) => (Number.isInteger(n) ? String(n) : n.toLocaleString("tr-TR"));
+
+// Telefonu WhatsApp (wa.me) için uluslararası biçime indirger: yalnız rakam,
+// başına 90. "0532…" → "90532…", "532…" (10 hane) → "90532…".
+function waPhone(phone: string | null): string | null {
+  if (!phone) return null;
+  const d = phone.replace(/\D/g, "");
+  if (!d) return null;
+  if (d.startsWith("90")) return d;
+  if (d.startsWith("0")) return "90" + d.slice(1);
+  if (d.length === 10) return "90" + d;
+  return d;
+}
+
+// Basit WhatsApp logosu (buton ikonu).
+function WaIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current" aria-hidden>
+      <path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.945C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 018.413 3.488 11.82 11.82 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.51 5.26l-.999 3.648 3.978-1.044zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
+    </svg>
+  );
+}
 const toBaseCount = (s: string) => {
   const n = parseInt(s.trim(), 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
@@ -146,6 +168,43 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
       ? `1 ${p.unit} = ${p.baseCount} adet · birim başı ${formatKurus(Math.round(p.lastPrice / p.baseCount))}`
       : `birim: ${p.unit}`;
 
+  // WhatsApp sipariş mesajı — girilen kalemler: ürün + adet + son bilinen fiyat.
+  // Fiyat tahminîdir (toptancı son fiyatı), "~" ile işaretlenir.
+  const orderText = useMemo(() => {
+    const supplier = suppliers.find((s) => s.id === supplierId);
+    const lines: string[] = ["Merhaba, Konak Kebap sipariş:", ""];
+    for (const p of products) {
+      const qty = toQty(rows[p.packageId]?.qty ?? "");
+      if (qty <= 0) continue;
+      const price = priceKurus(rows[p.packageId] ?? { qty: "", price: "" }, p);
+      const priceTxt = price != null && price > 0 ? ` (~${formatKurus(price)})` : "";
+      lines.push(`• ${fmtQty(qty)} ${p.unit} ${p.productName}${priceTxt}`);
+    }
+    for (const r of newRows) {
+      const qty = toQty(r.qty);
+      if (qty <= 0 || !r.name.trim()) continue;
+      let priceTxt = "";
+      if (r.price.trim()) {
+        try {
+          priceTxt = ` (~${formatKurus(tlToKurus(r.price))})`;
+        } catch {
+          priceTxt = "";
+        }
+      }
+      lines.push(`• ${fmtQty(qty)} ${r.unit.trim() || "Adet"} ${r.name.trim()}${priceTxt}`);
+    }
+    lines.push("", `— ${supplier?.name ?? ""}`);
+    return lines.join("\n");
+  }, [products, rows, newRows, supplierId, suppliers]);
+
+  const waUrl = useMemo(() => {
+    const phone = waPhone(suppliers.find((s) => s.id === supplierId)?.phone ?? null);
+    const base = phone ? `https://wa.me/${phone}` : "https://wa.me/";
+    return `${base}?text=${encodeURIComponent(orderText)}`;
+  }, [orderText, supplierId, suppliers]);
+
+  const supplierHasPhone = !!waPhone(suppliers.find((s) => s.id === supplierId)?.phone ?? null);
+
   function submit() {
     setError(null);
     setOk(null);
@@ -215,7 +274,7 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
     return (
       <div
         key={p.packageId}
-        className={`grid grid-cols-[minmax(0,1fr)_84px_72px] items-center gap-2 rounded-lg border px-2.5 py-2 transition sm:grid-cols-[minmax(0,1fr)_120px_76px_104px] sm:px-3 ${
+        className={`grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-2 rounded-lg border px-2.5 py-2 transition sm:grid-cols-[minmax(0,1fr)_120px_76px_104px] sm:px-3 ${
           on ? "border-ember/40 bg-ember-soft/50" : "border-transparent hover:bg-surface-2"
         }`}
       >
@@ -225,22 +284,43 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
             <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{p.unit}</span>
           </div>
           <p className="mt-0.5 truncate text-[11px] text-muted">{fmtBase(p)}</p>
+
+          {/* Mobil: satır aktifken kompakt fiyat + tutar (masaüstünde ayrı sütunlar) */}
+          {on && (
+            <div className="mt-1.5 flex items-center gap-1.5 sm:hidden">
+              <input
+                inputMode="decimal"
+                value={r.price}
+                onChange={(e) => patch(p.packageId, { price: e.target.value })}
+                placeholder={p.lastPrice != null ? formatKurus(p.lastPrice).replace("₺", "").trim() : "fiyat"}
+                title="Son fiyat ön-dolu. Değişmediyse boş bırak."
+                className={`nums w-24 rounded-md border bg-surface px-2 py-1 text-right text-xs text-ink outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15 ${
+                  outlier(p) ? "border-debt/60 ring-2 ring-debt/15" : "border-line"
+                }`}
+              />
+              <span className="text-[11px] text-muted">× {fmtQty(qty)} =</span>
+              <span className="nums text-xs font-semibold text-ink">{formatKurus(line)}</span>
+              {outlier(p) && (
+                <span title="Son fiyattan %10+ farklı" className="text-[11px] font-bold text-debt">?</span>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Fiyat — son fiyat ön-dolu */}
-        <div className="relative">
+        {/* Fiyat — son fiyat ön-dolu (masaüstü sütunu) */}
+        <div className="relative hidden sm:block">
           <input
             inputMode="decimal"
             value={r.price}
             onChange={(e) => patch(p.packageId, { price: e.target.value })}
             placeholder={p.lastPrice != null ? formatKurus(p.lastPrice).replace("₺", "").trim() : "fiyat"}
             title="Son fiyat ön-dolu. Değişmediyse boş bırak."
-            className={`${field} nums hidden text-right sm:block ${outlier(p) ? "border-debt/60 ring-2 ring-debt/15" : ""}`}
+            className={`${field} nums text-right ${outlier(p) ? "border-debt/60 ring-2 ring-debt/15" : ""}`}
           />
           {outlier(p) && (
             <span
               title="Son fiyattan %10+ farklı — yanlış okumuş olabilir misin?"
-              className="pointer-events-none absolute -right-1 -top-1 hidden h-4 w-4 place-items-center rounded-full bg-debt text-[10px] font-bold text-white sm:grid"
+              className="pointer-events-none absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-debt text-[10px] font-bold text-white"
             >
               ?
             </span>
@@ -256,7 +336,7 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNext(p.packageId); } }}
           onFocus={(e) => e.currentTarget.select()}
           placeholder="0"
-          className={`${field} nums text-center text-base font-semibold ${on ? "border-ember/50" : ""}`}
+          className={`${field} nums self-start text-center text-base font-semibold sm:self-auto ${on ? "border-ember/50" : ""}`}
         />
 
         {/* Tutar — geniş ekranda */}
@@ -425,9 +505,9 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
 
       {/* Alt özet + çapraz-kontrol — responsive */}
       <div className="sticky bottom-0 z-30 mt-4 rounded-card border border-line bg-surface shadow-pop">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 sm:px-5">
+        <div className="p-3.5 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 sm:p-4 sm:px-5">
           {/* Toplam */}
-          <div className="flex items-baseline gap-2.5">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
             <span className="text-sm text-muted">
               <span className="nums font-semibold text-ink">{itemCount}</span> kalem
             </span>
@@ -441,50 +521,79 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
             )}
           </div>
 
-          {/* KDV (opsiyonel) */}
-          <div className="flex items-center gap-2 sm:ml-auto">
-            <label className="text-[11px] font-medium uppercase tracking-wider text-muted">KDV %</label>
-            <input
-              inputMode="numeric"
-              value={vat}
-              onChange={(e) => setVat(e.target.value)}
-              placeholder="ops."
-              title="Opsiyonel. Boş = KDV yok. İrsaliye toplamı KDV dahil karşılaştırılır."
-              className={`${field} nums w-16 text-right`}
-            />
-          </div>
+          {/* KDV + İrsaliye — mobilde yan yana tek satır */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 sm:mt-0 sm:ml-auto sm:gap-x-6">
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-medium uppercase tracking-wider text-muted">KDV %</label>
+              <input
+                inputMode="numeric"
+                value={vat}
+                onChange={(e) => setVat(e.target.value)}
+                placeholder="ops."
+                title="Opsiyonel. Boş = KDV yok. İrsaliye toplamı KDV dahil karşılaştırılır."
+                className={`${field} nums w-16 text-right`}
+              />
+            </div>
 
-          {/* İrsaliye çapraz-kontrolü */}
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="text-[11px] font-medium uppercase tracking-wider text-muted">İrsaliye toplamı</label>
-            <input
-              inputMode="decimal"
-              value={invoiceTotal}
-              onChange={(e) => setInvoiceTotal(e.target.value)}
-              placeholder="örn. 10.935"
-              className={`${field} nums w-28 text-right sm:w-32 ${
-                invKurus == null ? "" : matched ? "border-credit/50 ring-2 ring-credit/15" : "border-debt/50 ring-2 ring-debt/15"
-              }`}
-            />
-            {invKurus != null &&
-              (matched ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-credit-soft px-2.5 py-1 text-xs font-medium text-credit">
-                  ✓ Tutuyor
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 rounded-full bg-debt-soft px-2.5 py-1 text-xs font-medium text-debt">
-                  Fark {formatKurus(Math.abs(diff!))}
-                </span>
-              ))}
+            {/* İrsaliye çapraz-kontrolü */}
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-[11px] font-medium uppercase tracking-wider text-muted">İrsaliye toplamı</label>
+              <input
+                inputMode="decimal"
+                value={invoiceTotal}
+                onChange={(e) => setInvoiceTotal(e.target.value)}
+                placeholder="örn. 10.935"
+                className={`${field} nums w-28 text-right sm:w-32 ${
+                  invKurus == null ? "" : matched ? "border-credit/50 ring-2 ring-credit/15" : "border-debt/50 ring-2 ring-debt/15"
+                }`}
+              />
+              {invKurus != null &&
+                (matched ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-credit-soft px-2.5 py-1 text-xs font-medium text-credit">
+                    ✓ Tutuyor
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-debt-soft px-2.5 py-1 text-xs font-medium text-debt">
+                    Fark {formatKurus(Math.abs(diff!))}
+                  </span>
+                ))}
+            </div>
           </div>
 
           {/* Aksiyonlar */}
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2">
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:gap-2">
+            {/* WhatsApp ile sipariş — mobilde tam genişlik, üstte */}
+            {itemCount > 0 ? (
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={
+                  supplierHasPhone
+                    ? "Seçilenleri WhatsApp'tan toptancıya gönder"
+                    : "Bu toptancıda telefon yok — WhatsApp açılır, kişiyi sen seçersin"
+                }
+                className="col-span-2 inline-flex items-center justify-center gap-2 rounded-lg bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1ebe5d] sm:order-2 sm:col-span-1 sm:py-2"
+              >
+                <WaIcon />
+                WhatsApp ile sipariş
+              </a>
+            ) : (
+              <button
+                type="button"
+                disabled
+                title="Önce adet girin"
+                className="col-span-2 inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-[#25D366]/50 px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:col-span-1 sm:py-2"
+              >
+                <WaIcon />
+                WhatsApp ile sipariş
+              </button>
+            )}
             <button
               type="button"
               onClick={() => changeSupplier(supplierId)}
               disabled={pending}
-              className="rounded-lg border border-line px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-50 sm:border-transparent"
+              className="rounded-lg border border-line px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-50 sm:order-1 sm:border-transparent"
             >
               Sıfırla
             </button>
@@ -492,7 +601,7 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
               type="button"
               onClick={submit}
               disabled={pending || itemCount === 0}
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50 sm:order-3"
             >
               {pending && <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />}
               {pending ? "Kaydediliyor…" : "Alışı kaydet"}

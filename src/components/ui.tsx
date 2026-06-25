@@ -17,14 +17,14 @@ export function PageHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="mb-8 flex items-end justify-between gap-4">
+    <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
       <div>
-        <h1 className="font-display text-[34px] font-semibold leading-none tracking-[-0.02em] text-ink">
+        <h1 className="font-display text-[26px] font-semibold leading-tight tracking-[-0.02em] text-ink sm:text-[34px] sm:leading-none">
           {title}
         </h1>
-        {subtitle && <p className="mt-2 text-sm text-muted">{subtitle}</p>}
+        {subtitle && <p className="mt-1.5 text-sm text-muted sm:mt-2">{subtitle}</p>}
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
