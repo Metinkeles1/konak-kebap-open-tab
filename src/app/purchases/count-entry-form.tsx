@@ -170,6 +170,7 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
 
   // WhatsApp sipariş mesajı — girilen kalemler: ürün + adet + son bilinen fiyat.
   // Fiyat tahminîdir (toptancı son fiyatı), "~" ile işaretlenir.
+  // Ürünler satır satır, en altta KDV ve toplam; toptancı adı sadece en altta.
   const orderText = useMemo(() => {
     const supplier = suppliers.find((s) => s.id === supplierId);
     const lines: string[] = ["Merhaba, Konak Kebap sipariş:", ""];
@@ -193,9 +194,17 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
       }
       lines.push(`• ${fmtQty(qty)} ${r.unit.trim() || "Adet"} ${r.name.trim()}${priceTxt}`);
     }
+    
+    // KDV ve toplam
+    lines.push("");
+    if (vatAmount > 0) {
+      lines.push(`KDV %${vatRate}: ${formatKurus(vatAmount)}`);
+    }
+    lines.push(`Toplam: ${formatKurus(total)}`);
+    
     lines.push("", `— ${supplier?.name ?? ""}`);
     return lines.join("\n");
-  }, [products, rows, newRows, supplierId, suppliers]);
+  }, [products, rows, newRows, supplierId, suppliers, vatAmount, vatRate, total]);
 
   const waUrl = useMemo(() => {
     const phone = waPhone(suppliers.find((s) => s.id === supplierId)?.phone ?? null);
