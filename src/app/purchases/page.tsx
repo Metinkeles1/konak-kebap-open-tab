@@ -11,7 +11,7 @@ export default async function PurchasesPage() {
     prisma.supplier.findMany({
       where: { deletedAt: null },
       orderBy: { name: "asc" },
-      select: { id: true, name: true },
+      select: { id: true, name: true, phone: true },
     }),
     prisma.purchase.findMany({
       where: { deletedAt: null },

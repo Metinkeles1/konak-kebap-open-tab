@@ -33,7 +33,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-ink/55 p-4 sm:p-8"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-ink/55 p-3 sm:p-8"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -42,7 +42,7 @@ export function Modal({
         className={`my-auto w-full ${maxWidth} rounded-card border border-line bg-paper shadow-pop`}
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-line px-6 py-4">
+        <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-3.5 sm:px-6 sm:py-4">
           <div className="min-w-0">
             <h2 className="font-display text-xl font-semibold tracking-tight text-ink">
               {title}
@@ -60,7 +60,7 @@ export function Modal({
           </button>
         </header>
 
-        <div className="p-6">{children}</div>
+        <div className="p-4 sm:p-6">{children}</div>
       </div>
     </div>
   );

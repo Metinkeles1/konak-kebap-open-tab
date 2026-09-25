@@ -46,7 +46,7 @@ type Row = {
 };
 
 const field =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
+  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
 
 let rowSeq = 0;
 const nextKey = () => `r${rowSeq++}`;
@@ -227,7 +227,7 @@ export function EditPurchaseForm({
         <span className="text-muted/70">(bu toptancıya bağlı olmayanlar dahil)</span>
       </label>
 
-      <div className="mt-3 grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted">
+      <div className="mt-3 hidden grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted sm:grid">
         <span>Ürün</span>
         <span>Birim</span>
         <span>Adet</span>
@@ -240,8 +240,9 @@ export function EditPurchaseForm({
           const isNew = !row.id;
           const lp = lastPriceOf(row.packageId, row.productId);
           return (
-            <div key={row.key} className="grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2">
+            <div key={row.key} className="mt-2 grid grid-cols-[minmax(0,1fr)_4rem_minmax(0,1.2fr)_28px] items-center gap-2 rounded-lg border border-line p-2 sm:mt-0 sm:grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] sm:border-0 sm:p-0">
               {/* Ürün: mevcut kalemde etiket, yeni kalemde seçim */}
+              <div className="order-1 col-span-3 min-w-0 sm:col-span-1">
               {isNew ? (
                 <select
                   value={row.productId}
@@ -264,8 +265,10 @@ export function EditPurchaseForm({
                   {row.label}
                 </div>
               )}
+              </div>
 
               {/* Birim: yeni kalemde seçim, mevcut kalemde sabit etiket */}
+              <div className="order-3 min-w-0 sm:order-2">
               {isNew ? (
                 <select
                   value={row.packageId}
@@ -285,6 +288,7 @@ export function EditPurchaseForm({
                   {row.label?.split(" · ")[1] ?? "—"}
                 </div>
               )}
+              </div>
 
               <input
                 inputMode="decimal"
@@ -292,19 +296,19 @@ export function EditPurchaseForm({
                 onChange={(e) => patch(row.key, { quantity: e.target.value })}
                 placeholder="Adet"
                 title="Adet (kg için ondalık girebilirsiniz, ör. 2,5)"
-                className={`${field} nums`}
+                className={`${field} nums order-4 sm:order-3`}
               />
               <input
                 inputMode="decimal"
                 value={row.price}
                 onChange={(e) => patch(row.key, { price: e.target.value })}
                 placeholder={lp != null ? `son ${formatKurus(lp)}` : "Fiyat"}
-                className={`${field} nums`}
+                className={`${field} nums order-5 col-span-2 sm:order-4 sm:col-span-1`}
               />
               <button
                 type="button"
                 onClick={() => removeRow(row.key)}
-                className="grid h-9 w-7 place-items-center rounded-lg text-muted transition-colors hover:bg-debt-soft hover:text-debt"
+                className="order-2 grid h-9 w-7 place-items-center rounded-lg text-muted transition-colors hover:bg-debt-soft hover:text-debt sm:order-5"
                 title="Kalemi kaldır"
               >
                 ✕
@@ -351,7 +355,7 @@ export function EditPurchaseForm({
       </div>
 
       <div className="mt-4 flex items-center justify-end border-t border-line pt-4">
-        <div className="flex items-center gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
           <button
             type="button"
             onClick={onDone}
@@ -364,7 +368,7 @@ export function EditPurchaseForm({
             type="button"
             onClick={save}
             disabled={pending}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
           >
             {pending && (
               <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />

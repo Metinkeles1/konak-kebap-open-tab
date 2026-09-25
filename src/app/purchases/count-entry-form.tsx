@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { createPurchase, type NewPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
 import { isPackagingUnit } from "@/lib/units";
+import { buildOrderText, fmtQty, WhatsAppButton } from "./whatsapp";
 
 export type CountPackage = {
   packageId: string;
@@ -30,35 +31,13 @@ type NewRow = { name: string; unit: string; baseCount: string; qty: string; pric
 const UNIT_SUGGESTIONS = ["Adet", "Koli", "Kasa", "Paket", "Balya", "Kg", "Gram", "Litre", "ML", "Çuval", "Teneke", "Rulo"];
 
 const field =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
+  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
 
 const lc = (s: string) => s.trim().toLocaleLowerCase("tr");
 const toQty = (s: string) => {
   const n = Number(s.trim().replace(",", "."));
   return Number.isFinite(n) && n > 0 ? n : 0;
 };
-const fmtQty = (n: number) => (Number.isInteger(n) ? String(n) : n.toLocaleString("tr-TR"));
-
-// Telefonu WhatsApp (wa.me) için uluslararası biçime indirger: yalnız rakam,
-// başına 90. "0532…" → "90532…", "532…" (10 hane) → "90532…".
-function waPhone(phone: string | null): string | null {
-  if (!phone) return null;
-  const d = phone.replace(/\D/g, "");
-  if (!d) return null;
-  if (d.startsWith("90")) return d;
-  if (d.startsWith("0")) return "90" + d.slice(1);
-  if (d.length === 10) return "90" + d;
-  return d;
-}
-
-// Basit WhatsApp logosu (buton ikonu).
-function WaIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current" aria-hidden>
-      <path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.945C.16 5.335 5.495 0 12.05 0a11.82 11.82 0 018.413 3.488 11.82 11.82 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.51 5.26l-.999 3.648 3.978-1.044zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
-    </svg>
-  );
-}
 const toBaseCount = (s: string) => {
   const n = parseInt(s.trim(), 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
@@ -182,50 +161,27 @@ export function CountEntryForm({
       : `birim: ${p.unit}`;
 
   // WhatsApp sipariş mesajı — girilen kalemler: ürün + adet + son bilinen fiyat.
-  // Fiyat tahminîdir (toptancı son fiyatı), "~" ile işaretlenir.
-  // Ürünler satır satır, en altta KDV ve toplam; toptancı adı sadece en altta.
-  const orderText = useMemo(() => {
-    const supplier = suppliers.find((s) => s.id === supplierId);
-    const lines: string[] = ["Merhaba, Konak Kebap sipariş:", ""];
-    for (const p of products) {
-      const qty = toQty(rows[p.packageId]?.qty ?? "");
-      if (qty <= 0) continue;
-      const price = priceKurus(rows[p.packageId] ?? { qty: "", price: "" }, p);
-      const priceTxt = price != null && price > 0 ? ` (~${formatKurus(price)})` : "";
-      lines.push(`• ${fmtQty(qty)} ${p.unit} ${p.productName}${priceTxt}`);
-    }
-    for (const r of newRows) {
-      const qty = toQty(r.qty);
-      if (qty <= 0 || !r.name.trim()) continue;
-      let priceTxt = "";
-      if (r.price.trim()) {
-        try {
-          priceTxt = ` (~${formatKurus(tlToKurus(r.price))})`;
-        } catch {
-          priceTxt = "";
-        }
-      }
-      lines.push(`• ${fmtQty(qty)} ${r.unit.trim() || "Adet"} ${r.name.trim()}${priceTxt}`);
-    }
-    
-    // KDV ve toplam
-    lines.push("");
-    if (vatAmount > 0) {
-      lines.push(`KDV %${vatRate}: ${formatKurus(vatAmount)}`);
-    }
-    lines.push(`Toplam: ${formatKurus(total)}`);
-    
-    lines.push("", `— ${supplier?.name ?? ""}`);
-    return lines.join("\n");
-  }, [products, rows, newRows, supplierId, suppliers, vatAmount, vatRate, total]);
-
-  const waUrl = useMemo(() => {
-    const phone = waPhone(suppliers.find((s) => s.id === supplierId)?.phone ?? null);
-    const base = phone ? `https://wa.me/${phone}` : "https://wa.me/";
-    return `${base}?text=${encodeURIComponent(orderText)}`;
-  }, [orderText, supplierId, suppliers]);
-
-  const supplierHasPhone = !!waPhone(suppliers.find((s) => s.id === supplierId)?.phone ?? null);
+  const supplier = suppliers.find((s) => s.id === supplierId);
+  const orderText = buildOrderText({
+    lines: [
+      ...products.flatMap((p) => {
+        const r = rows[p.packageId];
+        const qty = toQty(r?.qty ?? "");
+        return qty > 0 ? [{ quantity: qty, unit: p.unit, name: p.productName, price: priceKurus(r, p) }] : [];
+      }),
+      ...newRows.flatMap((r) => {
+        const qty = toQty(r.qty);
+        if (qty <= 0 || !r.name.trim()) return [];
+        let price: number | null = null;
+        try { price = r.price.trim() ? tlToKurus(r.price) : null; } catch { price = null; }
+        return [{ quantity: qty, unit: r.unit.trim() || "Adet", name: r.name.trim(), price }];
+      }),
+    ],
+    supplierName: supplier?.name ?? "",
+    vatRate,
+    vatAmount,
+    total,
+  });
 
   function submit() {
     setError(null);
@@ -562,74 +518,58 @@ export function CountEntryForm({
             )}
           </div>
 
-          {/* KDV + İrsaliye — mobilde yan yana tek satır */}
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 sm:mt-0 sm:ml-auto sm:gap-x-6">
-            <div className="flex items-center gap-2">
-              <label className="text-[11px] font-medium uppercase tracking-wider text-muted">KDV %</label>
+          {/* KDV + İrsaliye — mobilde iki sütun tek satır (etiket üstte), geniş ekranda yan yana */}
+          <div className="mt-3 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 sm:mt-0 sm:ml-auto sm:flex sm:flex-wrap sm:items-center sm:gap-x-6">
+            <label className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+              <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wider text-muted">KDV %</span>
               <input
                 inputMode="numeric"
                 value={vat}
                 onChange={(e) => setVat(e.target.value)}
                 placeholder="ops."
                 title="Opsiyonel. Boş = KDV yok. İrsaliye toplamı KDV dahil karşılaştırılır."
-                className={`${field} nums w-16 text-right`}
+                className={`${field} nums text-right sm:w-16`}
               />
-            </div>
+            </label>
 
             {/* İrsaliye çapraz-kontrolü */}
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="text-[11px] font-medium uppercase tracking-wider text-muted">İrsaliye toplamı</label>
-              <input
-                inputMode="decimal"
-                value={invoiceTotal}
-                onChange={(e) => setInvoiceTotal(e.target.value)}
-                placeholder="örn. 10.935"
-                className={`${field} nums w-28 text-right sm:w-32 ${
-                  invKurus == null ? "" : matched ? "border-credit/50 ring-2 ring-credit/15" : "border-debt/50 ring-2 ring-debt/15"
-                }`}
-              />
-              {invKurus != null &&
-                (matched ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-credit-soft px-2.5 py-1 text-xs font-medium text-credit">
-                    ✓ Tutuyor
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-debt-soft px-2.5 py-1 text-xs font-medium text-debt">
-                    Fark {formatKurus(Math.abs(diff!))}
-                  </span>
-                ))}
-            </div>
+            <label className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+              <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wider text-muted">
+                İrsaliye toplamı
+              </span>
+              <span className="flex items-center gap-2">
+                <input
+                  inputMode="decimal"
+                  value={invoiceTotal}
+                  onChange={(e) => setInvoiceTotal(e.target.value)}
+                  placeholder="örn. 10.935"
+                  className={`${field} nums min-w-0 text-right sm:w-32 ${
+                    invKurus == null ? "" : matched ? "border-credit/50 ring-2 ring-credit/15" : "border-debt/50 ring-2 ring-debt/15"
+                  }`}
+                />
+                {invKurus != null &&
+                  (matched ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-credit-soft px-2.5 py-1 text-xs font-medium text-credit">
+                      ✓ Tutuyor
+                    </span>
+                  ) : (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-debt-soft px-2.5 py-1 text-xs font-medium text-debt">
+                      Fark {formatKurus(Math.abs(diff!))}
+                    </span>
+                  ))}
+              </span>
+            </label>
           </div>
 
           {/* Aksiyonlar */}
           <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:gap-2">
             {/* WhatsApp ile sipariş — mobilde tam genişlik, üstte */}
-            {itemCount > 0 ? (
-              <a
-                href={waUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={
-                  supplierHasPhone
-                    ? "Seçilenleri WhatsApp'tan toptancıya gönder"
-                    : "Bu toptancıda telefon yok — WhatsApp açılır, kişiyi sen seçersin"
-                }
-                className="col-span-2 inline-flex items-center justify-center gap-2 rounded-lg bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1ebe5d] sm:order-2 sm:col-span-1 sm:py-2"
-              >
-                <WaIcon />
-                WhatsApp ile sipariş
-              </a>
-            ) : (
-              <button
-                type="button"
-                disabled
-                title="Önce adet girin"
-                className="col-span-2 inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-[#25D366]/50 px-4 py-2.5 text-sm font-semibold text-white sm:order-2 sm:col-span-1 sm:py-2"
-              >
-                <WaIcon />
-                WhatsApp ile sipariş
-              </button>
-            )}
+            <WhatsAppButton
+              phone={supplier?.phone}
+              text={orderText}
+              disabled={itemCount === 0}
+              className="col-span-2 sm:order-2 sm:col-span-1"
+            />
             <button
               type="button"
               onClick={() => changeSupplier(supplierId)}

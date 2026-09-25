@@ -4,8 +4,9 @@ import { useMemo, useState, useTransition } from "react";
 import { createPurchase, type NewPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
 import { isPackagingUnit } from "@/lib/units";
+import { buildOrderText, WhatsAppButton, type OrderLine } from "./whatsapp";
 
-type SupplierOpt = { id: string; name: string };
+type SupplierOpt = { id: string; name: string; phone: string | null };
 type Unit = { packageId: string; unit: string; lastPrice: number | null };
 export type CatalogProduct = { productId: string; name: string; units: Unit[] };
 type Catalog = Record<string, CatalogProduct[]>;
@@ -38,7 +39,7 @@ const newRow = (): Row => ({
 });
 
 const field =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
+  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
 
 const lc = (s: string) => s.trim().toLocaleLowerCase("tr");
 
@@ -119,6 +120,23 @@ export function NewPurchaseForm({
   })();
   const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
   const total = subtotal + vatAmount;
+
+  // WhatsApp sipariş mesajı — adedi girilmiş, ürünü belli kalemler (sayım moduyla aynı biçim).
+  const supplier = suppliers.find((s) => s.id === supplierId);
+  const orderLines: OrderLine[] = rows.flatMap((r) => {
+    const qty = toQty(r.quantity);
+    const name = r.query.trim();
+    if (qty <= 0 || !name || (!r.productId && !r.isNewProduct)) return [];
+    const unit = selectedPkg(r)?.unit ?? (r.unitText.trim() || "Adet");
+    return [{ quantity: qty, unit, name, price: rowPriceKurus(r) }];
+  });
+  const orderText = buildOrderText({
+    lines: orderLines,
+    supplierName: supplier?.name ?? "",
+    vatRate,
+    vatAmount,
+    total,
+  });
 
   function patch(idx: number, p: Partial<Row>) {
     setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...p } : r)));
@@ -202,7 +220,7 @@ export function NewPurchaseForm({
         ))}
       </datalist>
 
-      <div className="space-y-4 p-5">
+      <div className="space-y-4 p-4 sm:p-5">
         <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted">
           Toptancı
           <select value={supplierId} onChange={(e) => changeSupplier(e.target.value)} className={field}>
@@ -254,7 +272,7 @@ export function NewPurchaseForm({
               <span className="text-muted/70">(bu toptancıya bağlı olmayanlar dahil)</span>
             </label>
 
-            <div className="grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted">
+            <div className="hidden grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted sm:grid">
               <span>Ürün</span>
               <span>Birim</span>
               <span>Adet</span>
@@ -280,9 +298,9 @@ export function NewPurchaseForm({
 
                 return (
                   <div key={idx} className="space-y-1">
-                  <div className="grid grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2">
+                  <div className="grid grid-cols-[minmax(0,1fr)_4rem_minmax(0,1.2fr)_28px] items-center gap-2 rounded-lg border border-line p-2 sm:grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] sm:border-0 sm:p-0">
                     {/* Ürün combobox */}
-                    <div className="relative">
+                    <div className="relative order-1 col-span-3 sm:col-span-1">
                       <input
                         value={row.query}
                         onChange={(e) =>
@@ -336,6 +354,7 @@ export function NewPurchaseForm({
                     </div>
 
                     {/* Birim — mevcut birimi seç ya da "+ Yeni birim…" ile serbest yaz */}
+                    <div className="order-3 min-w-0 sm:order-2">
                     {!unitActive ? (
                       <div className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-muted">—</div>
                     ) : freeUnit ? (
@@ -380,6 +399,7 @@ export function NewPurchaseForm({
                         <option value="__new__">+ Yeni birim…</option>
                       </select>
                     )}
+                    </div>
 
                     <input
                       inputMode="decimal"
@@ -387,19 +407,19 @@ export function NewPurchaseForm({
                       onChange={(e) => patch(idx, { quantity: e.target.value })}
                       placeholder="Adet"
                       title="Adet (kg için ondalık girebilirsiniz, ör. 2,5)"
-                      className={`${field} nums`}
+                      className={`${field} nums order-4 sm:order-3`}
                     />
                     <input
                       inputMode="decimal"
                       value={row.price}
                       onChange={(e) => patch(idx, { price: e.target.value })}
                       placeholder={pkg?.lastPrice != null ? `son ${formatKurus(pkg.lastPrice)}` : freeUnit ? "Fiyat *" : "Fiyat"}
-                      className={`${field} nums`}
+                      className={`${field} nums order-5 col-span-2 sm:order-4 sm:col-span-1`}
                     />
                     <button
                       type="button"
                       onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((_, i) => i !== idx) : [newRow()]))}
-                      className="grid h-9 w-7 place-items-center rounded-lg text-muted transition-colors hover:bg-debt-soft hover:text-debt"
+                      className="order-2 grid h-9 w-7 place-items-center rounded-lg text-muted transition-colors hover:bg-debt-soft hover:text-debt sm:order-5"
                       title="Kalemi kaldır"
                     >
                       ✕
@@ -452,17 +472,20 @@ export function NewPurchaseForm({
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={submit}
-                disabled={pending}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {pending && (
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
-                )}
-                {pending ? "Kaydediliyor…" : "Alışı kaydet"}
-              </button>
+              <div className="grid grid-cols-1 gap-2 sm:flex">
+                <WhatsAppButton phone={supplier?.phone} text={orderText} disabled={orderLines.length === 0} />
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={pending}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60 sm:py-2"
+                >
+                  {pending && (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
+                  )}
+                  {pending ? "Kaydediliyor…" : "Alışı kaydet"}
+                </button>
+              </div>
             </div>
           </>
         )}

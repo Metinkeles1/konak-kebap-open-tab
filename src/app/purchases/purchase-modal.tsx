@@ -63,27 +63,27 @@ export function PurchaseModal({
       ) : (
         <div className="space-y-5">
           {/* Kalemler */}
-          <div className="overflow-hidden rounded-card border border-line">
+          <div className="overflow-x-auto rounded-card border border-line">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-line bg-surface-2 text-left text-[11px] uppercase tracking-wider text-muted">
-                  <th className="px-4 py-2.5 font-medium">Ürün</th>
-                  <th className="px-4 py-2.5 font-medium">Birim</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Adet</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Birim fiyat</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Tutar</th>
+                  <th className="px-2.5 sm:px-4 py-2.5 font-medium">Ürün</th>
+                  <th className="px-2.5 sm:px-4 py-2.5 text-right font-medium">Miktar</th>
+                  <th className="px-2.5 sm:px-4 py-2.5 text-right font-medium">Birim fiyat</th>
+                  <th className="px-2.5 sm:px-4 py-2.5 text-right font-medium">Tutar</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {purchase.items.map((i) => (
                   <tr key={i.id}>
-                    <td className="px-4 py-2.5 font-medium text-ink">{i.productName}</td>
-                    <td className="px-4 py-2.5 text-ink-soft">{i.unit}</td>
-                    <td className="nums px-4 py-2.5 text-right text-ink-soft">{i.quantity}</td>
-                    <td className="nums px-4 py-2.5 text-right text-ink-soft">
+                    <td className="px-2.5 sm:px-4 py-2.5 font-medium text-ink">{i.productName}</td>
+                    <td className="nums whitespace-nowrap px-2.5 sm:px-4 py-2.5 text-right text-ink-soft">
+                      {i.quantity} {i.unit}
+                    </td>
+                    <td className="nums px-2.5 sm:px-4 py-2.5 text-right text-ink-soft">
                       {formatKurus(i.unitPrice)}
                     </td>
-                    <td className="nums px-4 py-2.5 text-right font-medium text-ink">
+                    <td className="nums px-2.5 sm:px-4 py-2.5 text-right font-medium text-ink">
                       {formatKurus(Math.round(i.unitPrice * i.quantity))}
                     </td>
                   </tr>
@@ -93,28 +93,28 @@ export function PurchaseModal({
                 {purchase.vatAmount > 0 && (
                   <>
                     <tr className="border-t border-line">
-                      <td colSpan={4} className="px-4 py-1.5 text-right text-xs text-muted">
+                      <td colSpan={3} className="px-2.5 sm:px-4 py-1.5 text-right text-xs text-muted">
                         Ara toplam
                       </td>
-                      <td className="nums px-4 py-1.5 text-right text-xs text-ink-soft">
+                      <td className="nums px-2.5 sm:px-4 py-1.5 text-right text-xs text-ink-soft">
                         {formatKurus(purchase.subtotal)}
                       </td>
                     </tr>
                     <tr>
-                      <td colSpan={4} className="px-4 py-1.5 text-right text-xs text-muted">
+                      <td colSpan={3} className="px-2.5 sm:px-4 py-1.5 text-right text-xs text-muted">
                         KDV %{purchase.vatRate}
                       </td>
-                      <td className="nums px-4 py-1.5 text-right text-xs text-ink-soft">
+                      <td className="nums px-2.5 sm:px-4 py-1.5 text-right text-xs text-ink-soft">
                         {formatKurus(purchase.vatAmount)}
                       </td>
                     </tr>
                   </>
                 )}
                 <tr className="border-t border-line bg-surface-2/50">
-                  <td colSpan={4} className="px-4 py-2.5 text-right text-sm text-muted">
+                  <td colSpan={3} className="px-2.5 sm:px-4 py-2.5 text-right text-sm text-muted">
                     {purchase.vatAmount > 0 ? "Genel toplam" : "Toplam"}
                   </td>
-                  <td className="px-4 py-2.5 text-right">
+                  <td className="px-2.5 sm:px-4 py-2.5 text-right">
                     <Money kurus={purchase.total} className="font-semibold" />
                   </td>
                 </tr>
@@ -123,7 +123,7 @@ export function PurchaseModal({
           </div>
 
           {purchase.note && (
-            <p className="rounded-lg bg-surface-2 px-4 py-2.5 text-sm text-ink-soft">
+            <p className="rounded-lg bg-surface-2 px-2.5 sm:px-4 py-2.5 text-sm text-ink-soft">
               <span className="text-muted">Not:</span> {purchase.note}
             </p>
           )}
