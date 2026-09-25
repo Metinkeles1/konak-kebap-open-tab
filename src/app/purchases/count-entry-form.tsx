@@ -69,7 +69,15 @@ function nowLocal() {
 }
 const newNewRow = (): NewRow => ({ name: "", unit: "", baseCount: "", qty: "1", price: "" });
 
-export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[]; catalog: Catalog }) {
+export function CountEntryForm({
+  suppliers,
+  catalog,
+  unitless,
+}: {
+  suppliers: SupplierOpt[];
+  catalog: Catalog;
+  unitless: Record<string, string[]>; // toptancı → birimi tanımlanmamış ürün adları
+}) {
   const router = useRouter();
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? "");
   const [date, setDate] = useState(nowLocal());
@@ -84,6 +92,11 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
   const [pending, startTransition] = useTransition();
 
   const products = useMemo(() => (supplierId ? catalog[supplierId] ?? [] : []), [supplierId, catalog]);
+  // Birimi olmayan ürünler: satır olarak listelenemez, tıklayınca adı dolu
+  // "yeni ürün" satırı açılır (sunucu aynı isimli ürünü bulup birimi ona ekler).
+  const pendingUnitless = (supplierId ? unitless[supplierId] ?? [] : []).filter(
+    (name) => !newRows.some((r) => lc(r.name) === lc(name)) && (!filter || lc(name).includes(lc(filter))),
+  );
 
   const visible = useMemo(() => {
     const q = lc(filter);
@@ -497,6 +510,25 @@ export function CountEntryForm({ suppliers, catalog }: { suppliers: SupplierOpt[
                   </div>
                 );
               })}
+            </div>
+          )}
+          {pendingUnitless.length > 0 && (
+            <div className="mb-3">
+              <p className="mb-1.5 text-[11px] text-muted">
+                Birimi tanımlanmamış ürünler — girmek için tıklayıp birim yazın:
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {pendingUnitless.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => setNewRows((rs) => [...rs, { ...newNewRow(), name }])}
+                    className="rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-ember/50 hover:text-ember"
+                  >
+                    + {name}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           <button

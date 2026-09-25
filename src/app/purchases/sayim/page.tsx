@@ -1,112 +1,42 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui";
+import { loadCatalog } from "@/lib/catalog";
 import { CountEntryForm, type CountPackage } from "../count-entry-form";
 
 // Sayım modu: tedarikçinin ürünleri hazır liste olarak gelir, kullanıcı yalnızca
-// adet yazar. Veri /purchases sayfasıyla aynı kaynaklardan beslenir; burada
-// katalog PAKET (alış birimi) granülünde + her birimin bu toptancıdaki son fiyatı
-// + sıklık (kaç alışta geçti) ile kurulur.
+// adet yazar. Katalog klasik formla ORTAK kaynaktan (@/lib/catalog) gelir; burada
+// yalnızca PAKET (alış birimi) granülüne açılır ve sıklığa göre sıralanır.
 export default async function SayimPage() {
-  const [suppliers, products, histItems] = await Promise.all([
-    prisma.supplier.findMany({
-      where: { deletedAt: null },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, phone: true },
-    }),
-    prisma.product.findMany({
-      where: { deletedAt: null },
-      orderBy: { name: "asc" },
-      include: { packages: { where: { deletedAt: null }, orderBy: { name: "asc" } } },
-    }),
-    // Katalog üyeliği + sıklık: hangi birim hangi toptancıdan kaç kez alınmış.
-    prisma.purchaseItem.findMany({
-      where: { purchase: { deletedAt: null } },
-      select: {
-        productPackageId: true,
-        purchase: { select: { supplierId: true } },
-      },
-    }),
-  ]);
-
-  // Her (toptancı, birim) için o toptancının EN SON fiyatı.
-  const priceHist = await prisma.priceHistory.findMany({
-    where: { supplierId: { not: null } },
-    orderBy: { effectiveDate: "desc" },
-    select: { supplierId: true, productPackageId: true, unitPrice: true },
+  const suppliers = await prisma.supplier.findMany({
+    where: { deletedAt: null },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, phone: true },
   });
-  const lastBySupplierPkg = new Map<string, number>();
-  for (const h of priceHist) {
-    const key = `${h.supplierId}:${h.productPackageId}`;
-    if (!lastBySupplierPkg.has(key)) lastBySupplierPkg.set(key, h.unitPrice);
-  }
-
-  // Birim bilgileri
-  const pkgInfo = new Map<
-    string,
-    { productId: string; productName: string; unit: string; baseCount: number; lastUnitPrice: number | null }
-  >();
-  for (const p of products) {
-    for (const pkg of p.packages) {
-      pkgInfo.set(pkg.id, {
-        productId: p.id,
-        productName: p.name,
-        unit: pkg.name,
-        baseCount: pkg.quantityInBase,
-        lastUnitPrice: pkg.lastUnitPrice,
-      });
-    }
-  }
-
-  // Üyelik: o toptancıdan alınan birimler ∪ o toptancıya atanmış ürünlerin tüm birimleri
-  const supplierPkgIds: Record<string, Set<string>> = {};
-  const freqCount = new Map<string, number>();
-  for (const it of histItems) {
-    const sid = it.purchase.supplierId;
-    (supplierPkgIds[sid] ??= new Set()).add(it.productPackageId);
-    const key = `${sid}:${it.productPackageId}`;
-    freqCount.set(key, (freqCount.get(key) ?? 0) + 1);
-  }
-  // defaultSupplier'ı olan ürünler yalnızca o toptancıda; toptancısı olmayan
-  // ("Opsiyonel" bırakılmış) ürünler hiçbir toptancıya bağlı değildir — bunları
-  // HER toptancının listesine ekle ki sayım modunda görünüp girilebilsinler.
-  const orphanPkgIds: string[] = [];
-  for (const p of products) {
-    if (p.defaultSupplierId) {
-      for (const pkg of p.packages) (supplierPkgIds[p.defaultSupplierId] ??= new Set()).add(pkg.id);
-    } else {
-      for (const pkg of p.packages) orphanPkgIds.push(pkg.id);
-    }
-  }
-  if (orphanPkgIds.length) {
-    for (const s of suppliers) {
-      const set = (supplierPkgIds[s.id] ??= new Set());
-      for (const id of orphanPkgIds) set.add(id);
-    }
-  }
+  const { catalog: byProduct } = await loadCatalog(suppliers.map((s) => s.id));
 
   const catalog: Record<string, CountPackage[]> = {};
-  for (const [sid, ids] of Object.entries(supplierPkgIds)) {
-    catalog[sid] = [...ids]
-      .map((id): CountPackage | null => {
-        const info = pkgInfo.get(id);
-        if (!info) return null;
-        const key = `${sid}:${id}`;
-        return {
-          packageId: id,
-          productId: info.productId,
-          productName: info.productName,
-          unit: info.unit,
-          baseCount: info.baseCount,
-          lastPrice: lastBySupplierPkg.get(key) ?? info.lastUnitPrice,
-          freq: (freqCount.get(key) ?? 0) >= 2,
-        };
-      })
-      .filter((r): r is CountPackage => r !== null)
+  // Birimi hiç tanımlanmamış ürünler sayım satırı olamaz (satır = alış birimi);
+  // form bunları "birim ekleyerek gir" kısayolu olarak gösterir.
+  const unitless: Record<string, string[]> = {};
+  for (const [sid, products] of Object.entries(byProduct)) {
+    catalog[sid] = products
+      .flatMap((p) =>
+        p.units.map((u) => ({
+          packageId: u.packageId,
+          productId: p.productId,
+          productName: p.name,
+          unit: u.unit,
+          baseCount: u.baseCount,
+          lastPrice: u.lastPrice,
+          freq: u.purchaseCount >= 2,
+        })),
+      )
       .sort(
         (a, b) =>
           Number(b.freq) - Number(a.freq) || a.productName.localeCompare(b.productName, "tr"),
       );
+    unitless[sid] = products.filter((p) => p.units.length === 0).map((p) => p.name);
   }
 
   return (
@@ -133,7 +63,7 @@ export default async function SayimPage() {
           ekleyin.
         </div>
       ) : (
-        <CountEntryForm suppliers={suppliers} catalog={catalog} />
+        <CountEntryForm suppliers={suppliers} catalog={catalog} unitless={unitless} />
       )}
     </>
   );

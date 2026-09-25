@@ -10,6 +10,14 @@ import {
   packageInputSchema,
 } from "@/lib/validations";
 
+// Bir değişiklikten sonra TÜM sayfaları yenile. Aynı veri (ürün, fiyat, cari)
+// birden çok sayfada görünüyor; yolları tek tek saymak bir sayfanın unutulmasına
+// yol açıyordu (ör. /purchases/sayim hiç yenilenmiyordu). Uygulama küçük olduğundan
+// kök layout'u geçersiz kılmak hem basit hem güvenli.
+function revalidateAll() {
+  revalidatePath("/", "layout");
+}
+
 // Form alanlarını okurken boş string'leri undefined'a çeviren yardımcı.
 function str(fd: FormData, key: string): string | undefined {
   const v = fd.get(key);
@@ -29,11 +37,7 @@ export async function createSupplier(fd: FormData) {
     openingBalance: openingTl ? tlToKurus(openingTl) : undefined,
   });
   await prisma.supplier.create({ data });
-  revalidatePath("/suppliers");
-  revalidatePath("/");
-  // Yeni toptancı ürün/alış formlarındaki seçim listelerinde de hemen görünsün.
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // Açılış/devir bakiyesini güncelle (TL girilir, kuruşa çevrilir).
@@ -46,9 +50,7 @@ export async function updateOpeningBalance(fd: FormData) {
     where: { id: supplierId },
     data: { openingBalance },
   });
-  revalidatePath(`/suppliers/${supplierId}`);
-  revalidatePath("/suppliers");
-  revalidatePath("/");
+  revalidateAll();
 }
 
 export async function deleteSupplier(fd: FormData) {
@@ -58,11 +60,7 @@ export async function deleteSupplier(fd: FormData) {
     where: { id },
     data: { deletedAt: new Date() },
   });
-  revalidatePath("/suppliers");
-  revalidatePath("/");
-  // Silinen toptancı ürün/alış formlarındaki seçim listelerinden de düşsün.
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // --- Ödeme ---
@@ -75,22 +73,17 @@ export async function createPayment(fd: FormData) {
     note: str(fd, "note"),
   });
   await prisma.payment.create({ data });
-  revalidatePath(`/suppliers/${data.supplierId}`);
-  revalidatePath("/suppliers");
-  revalidatePath("/");
+  revalidateAll();
 }
 
 export async function deletePayment(fd: FormData) {
   const id = str(fd, "id");
-  const supplierId = str(fd, "supplierId");
   if (!id) return;
   await prisma.payment.update({
     where: { id },
     data: { deletedAt: new Date() },
   });
-  if (supplierId) revalidatePath(`/suppliers/${supplierId}`);
-  revalidatePath("/suppliers");
-  revalidatePath("/");
+  revalidateAll();
 }
 
 // --- Ürün & birim ---
@@ -185,8 +178,7 @@ export async function createProduct(fd: FormData) {
       });
     });
 
-    revalidatePath("/products");
-    revalidatePath("/purchases");
+    revalidateAll();
     return;
   }
 
@@ -217,8 +209,7 @@ export async function createProduct(fd: FormData) {
     }
   });
 
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 export async function addPackage(fd: FormData) {
@@ -231,8 +222,7 @@ export async function addPackage(fd: FormData) {
     lastUnitPrice: priceTl ? tlToKurus(priceTl) : undefined,
   });
   await prisma.productPackage.create({ data: { ...data, productId } });
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // Bir alış biriminin adını ve içindeki baz birim sayısını DÜZELT (yanlış girilmişse).
@@ -246,8 +236,7 @@ export async function updatePackage(fd: FormData) {
     where: { id: packageId },
     data: { name, quantityInBase: qib },
   });
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // Yanlış eklenen bir alış birimini sil (soft delete). Geçmiş alışlar bu birime
@@ -260,8 +249,7 @@ export async function deletePackage(fd: FormData) {
     where: { id: packageId },
     data: { deletedAt: new Date() },
   });
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // Yanlış girilen ürün adını düzelt. Aynı isimli başka bir aktif ürün varsa engelle.
@@ -279,8 +267,7 @@ export async function renameProduct(fd: FormData) {
   });
   if (dup) throw new Error(`"${name}" adında başka bir ürün zaten var.`);
   await prisma.product.update({ where: { id: productId }, data: { name } });
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // Bir alış biriminin son fiyatını ELLE güncelle (alış girmeden).
@@ -314,8 +301,7 @@ export async function updatePackagePrice(fd: FormData) {
     });
   });
 
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // Belirli bir TOPTANCININ, belirli bir alış biriminin fiyatını ELLE güncelle/ekle
@@ -357,8 +343,7 @@ export async function updateSupplierPackagePrice(fd: FormData) {
     }
   });
 
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // Bir birimin fiyatını baz alıp ürünün DİĞER birimlerini quantityInBase oranıyla eşitle.
@@ -397,8 +382,7 @@ export async function applyProportionalPrice(fd: FormData) {
     }
   });
 
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // Ürünün varsayılan toptancısını ayarla (boş = yok). Varsayılan toptancı, yeni
@@ -411,8 +395,7 @@ export async function setDefaultSupplier(fd: FormData) {
     where: { id: productId },
     data: { defaultSupplierId: supplierId },
   });
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 export async function deleteProduct(fd: FormData) {
@@ -423,8 +406,7 @@ export async function deleteProduct(fd: FormData) {
     data: { deletedAt: new Date() },
   });
   // Liste tazelenince modal açık ürünü bulamaz ve kendiliğinden kapanır.
-  revalidatePath("/products");
-  revalidatePath("/purchases");
+  revalidateAll();
 }
 
 // --- Alış ---
@@ -644,11 +626,7 @@ export async function createPurchase(input: {
     maxWait: 10_000,
   });
 
-  revalidatePath("/purchases");
-  revalidatePath(`/suppliers/${input.supplierId}`);
-  revalidatePath("/suppliers");
-  revalidatePath("/products");
-  revalidatePath("/");
+  revalidateAll();
 }
 
 // Mevcut bir alışın düzenlenmesi (tam düzeltme).
@@ -766,25 +744,15 @@ export async function updatePurchase(input: {
     maxWait: 10_000,
   });
 
-  revalidatePath("/purchases");
-  revalidatePath(`/suppliers/${input.supplierId}`);
-  if (purchase.supplierId !== input.supplierId) {
-    revalidatePath(`/suppliers/${purchase.supplierId}`); // eski toptancının cari'si de değişir
-  }
-  revalidatePath("/suppliers");
-  revalidatePath("/");
+  revalidateAll();
 }
 
 export async function deletePurchase(fd: FormData) {
   const id = str(fd, "id");
-  const supplierId = str(fd, "supplierId");
   if (!id) return;
   await prisma.purchase.update({
     where: { id },
     data: { deletedAt: new Date() },
   });
-  revalidatePath("/purchases");
-  if (supplierId) revalidatePath(`/suppliers/${supplierId}`);
-  revalidatePath("/suppliers");
-  revalidatePath("/");
+  revalidateAll();
 }
