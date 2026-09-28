@@ -19,6 +19,11 @@ export function kurusToTl(kurus: number): number {
   return kurus / 100;
 }
 
+/** kuruş -> form kutusuna yazılacak "1234,5" gibi TL metni (tlToKurus ile geri okunur) */
+export function kurusToInput(kurus: number): string {
+  return kurusToTl(kurus).toString().replace(".", ",");
+}
+
 /** kuruş -> "12,50 ₺" gibi Türkçe biçim */
 export function formatKurus(kurus: number): string {
   return new Intl.NumberFormat("tr-TR", {

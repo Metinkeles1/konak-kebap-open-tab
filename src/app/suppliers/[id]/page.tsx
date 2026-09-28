@@ -1,16 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { formatKurus } from "@/lib/money";
+import { formatKurus, kurusToInput } from "@/lib/money";
 import { formatDate, formatDateTime } from "@/lib/format";
 import {
-  createPayment,
   deletePayment,
   deletePurchase,
   updateOpeningBalance,
 } from "@/app/actions";
 import { PageHeader, Card, Stat, Badge, inputClass } from "@/components/ui";
 import { SubmitButton, DeleteButton } from "@/components/form";
+import { PaymentDialog } from "@/components/payment-dialog";
 
 type Entry = {
   key: string;
@@ -25,12 +25,18 @@ type Entry = {
   del?: { action: typeof deletePurchase; id: string };
 };
 
+// Ekstrede varsayılan olarak gösterilen son hareket sayısı.
+const RECENT_LIMIT = 15;
+
 export default async function SupplierDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { id } = await params;
+  const showAll = (await searchParams).tum === "1";
 
   const supplier = await prisma.supplier.findFirst({
     where: { id, deletedAt: null },
@@ -127,6 +133,11 @@ export default async function SupplierDetailPage({
     });
   }
 
+  // Uzun ekstrede yalnızca son hareketleri göster; öncekiler tek "devreden" satırında özetlenir.
+  const hiddenCount = showAll ? 0 : Math.max(0, entries.length - RECENT_LIMIT);
+  const visibleEntries = entries.slice(hiddenCount);
+  const carriedBalance = hiddenCount > 0 ? entries[hiddenCount - 1].balance : 0;
+
   return (
     <>
       <Link
@@ -140,11 +151,14 @@ export default async function SupplierDetailPage({
         title={supplier.name}
         subtitle={supplier.phone ?? undefined}
         action={
-          balance.balance > 0 ? (
-            <Badge tone="debt">{formatKurus(balance.balance)} borç</Badge>
-          ) : (
-            <Badge tone="credit">Borç yok</Badge>
-          )
+          <div className="flex items-center gap-3">
+            {balance.balance > 0 ? (
+              <Badge tone="debt">{formatKurus(balance.balance)} borç</Badge>
+            ) : (
+              <Badge tone="credit">Borç yok</Badge>
+            )}
+            <PaymentDialog supplierId={id} supplierName={supplier.name} balance={balance.balance} />
+          </div>
         }
       />
 
@@ -161,7 +175,21 @@ export default async function SupplierDetailPage({
 
       {/* Cari ekstre */}
       <div className="mt-6">
-        <Card title="Cari ekstre" bodyClassName="">
+        <Card
+          title={showAll || hiddenCount === 0 ? "Cari ekstre" : `Cari ekstre · son ${RECENT_LIMIT} hareket`}
+          bodyClassName=""
+          action={
+            showAll ? (
+              <Link href={`/suppliers/${id}`} scroll={false} className="text-xs text-muted hover:text-ember">
+                Son hareketler
+              </Link>
+            ) : hiddenCount > 0 ? (
+              <Link href={`/suppliers/${id}?tum=1`} scroll={false} className="text-xs text-muted hover:text-ember">
+                Tümünü göster ({entries.length})
+              </Link>
+            ) : undefined
+          }
+        >
           {entries.length === 0 ? (
             <p className="px-5 py-10 text-center text-sm text-muted">
               Henüz hareket yok. Açılış bakiyesi girin ya da alış/ödeme ekleyin.
@@ -179,7 +207,32 @@ export default async function SupplierDetailPage({
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
-                {entries.map((e) => (
+                {hiddenCount > 0 && (
+                  <tr className="bg-surface-2/60">
+                    <td className="px-5 py-3 text-muted">—</td>
+                    <td className="px-5 py-3">
+                      <Link
+                        href={`/suppliers/${id}?tum=1`}
+                        scroll={false}
+                        className="font-medium text-ink-soft hover:text-ember"
+                      >
+                        Önceki {hiddenCount} hareket
+                      </Link>
+                      <p className="mt-0.5 text-xs text-muted">Devreden bakiye</p>
+                    </td>
+                    <td className="px-5 py-3" />
+                    <td className="px-5 py-3" />
+                    <td
+                      className={`nums px-5 py-3 text-right font-semibold ${
+                        carriedBalance > 0 ? "text-debt" : carriedBalance < 0 ? "text-credit" : "text-muted"
+                      }`}
+                    >
+                      {formatKurus(carriedBalance)}
+                    </td>
+                    <td className="px-3 py-3" />
+                  </tr>
+                )}
+                {visibleEntries.map((e) => (
                   <tr key={e.key} className="align-top hover:bg-surface-2">
                     <td className="nums whitespace-nowrap px-5 py-3 text-muted">
                       {e.kind === "opening"
@@ -228,27 +281,6 @@ export default async function SupplierDetailPage({
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="space-y-6">
-          {/* Ödeme ekle */}
-          <Card title="Ödeme ekle">
-            <form action={createPayment} className="space-y-3">
-              <input type="hidden" name="supplierId" value={id} />
-              <div className="grid grid-cols-2 gap-3">
-                <input name="amount" required inputMode="decimal" placeholder="Tutar (TL) *" className={inputClass} />
-                <select name="method" defaultValue="NAKIT" className={inputClass}>
-                  <option value="NAKIT">Nakit</option>
-                  <option value="HAVALE">Havale</option>
-                  <option value="KART">Kart</option>
-                  <option value="CEK">Çek</option>
-                  <option value="DIGER">Diğer</option>
-                </select>
-              </div>
-              <input name="note" placeholder="Not" className={inputClass} />
-              <SubmitButton variant="accent" className="w-full">
-                Ödemeyi kaydet
-              </SubmitButton>
-            </form>
-          </Card>
-
           {/* Açılış / devir bakiyesi */}
           <Card title="Açılış (devir) bakiyesi">
             <form action={updateOpeningBalance} className="flex gap-3">
@@ -256,7 +288,7 @@ export default async function SupplierDetailPage({
               <input
                 name="openingBalance"
                 inputMode="decimal"
-                defaultValue={(balance.openingBalance / 100).toString().replace(".", ",")}
+                defaultValue={kurusToInput(balance.openingBalance)}
                 placeholder="Devir borcu (TL)"
                 className={inputClass}
               />
