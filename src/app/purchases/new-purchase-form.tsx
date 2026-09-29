@@ -4,7 +4,8 @@ import { useMemo, useState, useTransition } from "react";
 import { createPurchase, type NewPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
 import { isPackagingUnit } from "@/lib/units";
-import { buildOrderText, WhatsAppButton, type OrderLine } from "./whatsapp";
+import { buildOrderText, WhatsAppButton, type OrderLine } from "@/components/whatsapp";
+import { ReconciliationDialog } from "@/components/reconciliation";
 
 type SupplierOpt = { id: string; name: string; phone: string | null };
 type Unit = { packageId: string; unit: string; lastPrice: number | null };
@@ -77,6 +78,8 @@ export function NewPurchaseForm({
   const [rows, setRows] = useState<Row[]>([newRow()]);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  // Kayıttan sonra açılan WhatsApp mutabakat penceresi.
+  const [recon, setRecon] = useState<{ id: string; supplierName: string; note: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   // Varsayılan: yalnızca seçili toptancının ürünleri. "Tüm ürünleri göster"
@@ -197,7 +200,12 @@ export function NewPurchaseForm({
 
     startTransition(async () => {
       try {
-        await createPurchase({ supplierId, note, date, vatRate, items: payload });
+        const { id } = await createPurchase({ supplierId, note, date, vatRate, items: payload });
+        setRecon({
+          id,
+          supplierName: supplier?.name ?? "",
+          note: `Alış kaydedildi · ${payload.length} kalem · ${formatKurus(total)}`,
+        });
         setRows([newRow()]);
         setNote("");
         setDate(nowLocal());
@@ -492,6 +500,15 @@ export function NewPurchaseForm({
 
         {error && <p className="rounded-lg bg-debt-soft px-3 py-2 text-sm text-debt">{error}</p>}
       </div>
+
+      {recon && (
+        <ReconciliationDialog
+          source={{ type: "purchase", purchaseId: recon.id }}
+          supplierName={recon.supplierName}
+          savedNote={recon.note}
+          onClose={() => setRecon(null)}
+        />
+      )}
     </div>
   );
 }

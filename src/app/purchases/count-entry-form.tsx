@@ -11,7 +11,8 @@ import { useRouter } from "next/navigation";
 import { createPurchase, type NewPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
 import { isPackagingUnit } from "@/lib/units";
-import { buildOrderText, fmtQty, WhatsAppButton } from "./whatsapp";
+import { buildOrderText, fmtQty, WhatsAppButton } from "@/components/whatsapp";
+import { ReconciliationDialog } from "@/components/reconciliation";
 
 export type CountPackage = {
   packageId: string;
@@ -68,6 +69,8 @@ export function CountEntryForm({
   const [invoiceTotal, setInvoiceTotal] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  // Kayıttan sonra açılan WhatsApp mutabakat penceresi.
+  const [recon, setRecon] = useState<{ id: string; supplierName: string; note: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   const products = useMemo(() => (supplierId ? catalog[supplierId] ?? [] : []), [supplierId, catalog]);
@@ -225,7 +228,7 @@ export function CountEntryForm({
 
     startTransition(async () => {
       try {
-        await createPurchase({ supplierId, note, date, vatRate, items });
+        const { id } = await createPurchase({ supplierId, note, date, vatRate, items });
         setRows({});
         setNewRows([]);
         setInvoiceTotal("");
@@ -233,7 +236,9 @@ export function CountEntryForm({
         setDate(nowLocal());
         setFilter("");
         setVat("");
-        setOk(`Alış kaydedildi · ${items.length} kalem · ${formatKurus(total)}`);
+        const savedNote = `Alış kaydedildi · ${items.length} kalem · ${formatKurus(total)}`;
+        setOk(savedNote);
+        setRecon({ id, supplierName: supplier?.name ?? "", note: savedNote });
         router.refresh(); // yeni ürünler katalogda görünsün
       } catch (e) {
         setError(e instanceof Error ? e.message : "Hata oluştu");
@@ -590,6 +595,15 @@ export function CountEntryForm({
           </div>
         </div>
       </div>
+
+      {recon && (
+        <ReconciliationDialog
+          source={{ type: "purchase", purchaseId: recon.id }}
+          supplierName={recon.supplierName}
+          savedNote={recon.note}
+          onClose={() => setRecon(null)}
+        />
+      )}
     </div>
   );
 }

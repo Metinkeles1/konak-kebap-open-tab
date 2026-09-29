@@ -11,6 +11,7 @@ import {
 import { PageHeader, Card, Stat, Badge, inputClass } from "@/components/ui";
 import { SubmitButton, DeleteButton } from "@/components/form";
 import { PaymentDialog } from "@/components/payment-dialog";
+import { BalanceReconButton } from "@/components/reconciliation";
 
 type Entry = {
   key: string;
@@ -151,12 +152,13 @@ export default async function SupplierDetailPage({
         title={supplier.name}
         subtitle={supplier.phone ?? undefined}
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {balance.balance > 0 ? (
               <Badge tone="debt">{formatKurus(balance.balance)} borç</Badge>
             ) : (
               <Badge tone="credit">Borç yok</Badge>
             )}
+            <BalanceReconButton supplierId={id} supplierName={supplier.name} />
             <PaymentDialog supplierId={id} supplierName={supplier.name} balance={balance.balance} />
           </div>
         }

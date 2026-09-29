@@ -1,6 +1,8 @@
-// WhatsApp sipariş mesajı — klasik form ve sayım modunun ORTAK parçası.
-// Mesaj biçimi tek yerde; iki mod da aynı metni üretir.
+// WhatsApp mesajları — sipariş (klasik form + sayım modu) ve cari mutabakat.
+// Mesaj biçimleri tek yerde; her ekran aynı metni üretir.
 import { formatKurus } from "@/lib/money";
+import { formatDate } from "@/lib/format";
+import type { PurchaseReconciliation, BalanceReconciliation } from "@/lib/reconciliation";
 
 export type OrderLine = {
   quantity: number;
@@ -49,6 +51,63 @@ export function buildOrderText({
   return out.join("\n");
 }
 
+// Bakiye metni: + borç, − alacak (toptancıya fazla ödenmiş).
+function fmtBalance(k: number): string {
+  return k < 0 ? `${formatKurus(-k)} (alacağımız)` : formatKurus(k);
+}
+
+function balanceLine(k: number): string {
+  if (k > 0) return `*Toplam borcumuz: ${formatKurus(k)}*`;
+  if (k < 0) return `*Alacağımız: ${formatKurus(-k)}*`;
+  return "*Hesabımız kapalı: ₺0,00*";
+}
+
+const RECON_CLOSING =
+  "Kayıtlarınızla uyuşuyorsa onaylar mısınız? Fark varsa lütfen yazın, birlikte düzeltelim. 🙏";
+
+// Alış sonrası mutabakat: kalemlerin maliyeti + önceki bakiye → güncel borç.
+export function buildPurchaseReconText(r: PurchaseReconciliation): string {
+  const out: string[] = ["Merhaba, Konak Kebap — cari mutabakat", ""];
+  out.push(`*Alış: ${formatDate(r.date)}*${r.documentNo ? ` · ${r.documentNo}` : ""}`);
+  for (const i of r.items) {
+    out.push(
+      `• ${fmtQty(i.quantity)} ${i.unit} ${i.name} × ${formatKurus(i.unitPrice)} = ${formatKurus(i.lineTotal)}`,
+    );
+  }
+  out.push("");
+  if (r.vatAmount > 0) {
+    out.push(`Ara toplam: ${formatKurus(r.subtotal)}`);
+    out.push(`KDV %${r.vatRate}: ${formatKurus(r.vatAmount)}`);
+  }
+  out.push(`*Alış toplamı: ${formatKurus(r.total)}*`);
+  out.push("");
+  out.push(`Önceki bakiye: ${fmtBalance(r.balanceBefore)}`);
+  out.push(`Bu alış: +${formatKurus(r.total)}`);
+  out.push(balanceLine(r.balanceAfter));
+  // Bu alıştan sonra başka alış/ödeme girildiyse bugünkü durumu da ayrıca yaz.
+  if (r.balanceNow !== r.balanceAfter) {
+    out.push(`(Sonraki hareketlerle bugünkü bakiye: ${fmtBalance(r.balanceNow)})`);
+  }
+  out.push("", RECON_CLOSING);
+  return out.join("\n");
+}
+
+// Genel bakiye mutabakatı: son hareketler + bugünkü bakiye.
+export function buildBalanceReconText(r: BalanceReconciliation): string {
+  const out: string[] = ["Merhaba, Konak Kebap — cari mutabakat", ""];
+  if (r.recent.length) {
+    out.push("Son hareketler:");
+    for (const t of r.recent) {
+      const amt = t.amount < 0 ? `−${formatKurus(-t.amount)}` : formatKurus(t.amount);
+      out.push(`• ${formatDate(t.date)} ${t.label}${t.documentNo ? ` ${t.documentNo}` : ""}: ${amt}`);
+    }
+    out.push("");
+  }
+  out.push(`${balanceLine(r.balanceNow)} (${formatDate(r.asOf)} itibarıyla)`);
+  out.push("", RECON_CLOSING);
+  return out.join("\n");
+}
+
 function WaIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current" aria-hidden>
@@ -64,18 +123,20 @@ export function WhatsAppButton({
   text,
   disabled,
   className = "",
+  label = "WhatsApp ile sipariş",
 }: {
   phone: string | null | undefined;
   text: string;
   disabled: boolean;
   className?: string;
+  label?: string;
 }) {
   const base = `inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-colors sm:py-2 ${className}`;
   if (disabled) {
     return (
       <button type="button" disabled title="Önce adet girin" className={`${base} cursor-not-allowed bg-[#25D366]/50`}>
         <WaIcon />
-        WhatsApp ile sipariş
+        {label}
       </button>
     );
   }
@@ -88,13 +149,13 @@ export function WhatsAppButton({
       rel="noopener noreferrer"
       title={
         num
-          ? "Seçilenleri WhatsApp'tan toptancıya gönder"
+          ? "WhatsApp'tan toptancıya gönder"
           : "Bu toptancıda telefon yok — WhatsApp açılır, kişiyi sen seçersin"
       }
       className={`${base} bg-[#25D366] hover:bg-[#1ebe5d]`}
     >
       <WaIcon />
-      WhatsApp ile sipariş
+      {label}
     </a>
   );
 }

@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
+import { InstallAppButton } from "@/components/install-app";
 
 const nav = [
   { href: "/", label: "Panel", icon: "▦" },
   { href: "/suppliers", label: "Toptancılar", icon: "❏" },
   { href: "/products", label: "Ürünler", icon: "◰" },
   { href: "/purchases", label: "Alışlar", icon: "↧" },
+  { href: "/prices", label: "Fiyat Takibi", icon: "↗" },
 ];
 
 // Tıklanan linkte gezinme tamamlanana kadar dönen küçük gösterge.
@@ -88,7 +90,10 @@ function NavBody({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      <div className="relative z-10 mt-auto border-t border-espresso-line px-6 py-5">
+      <div className="mt-auto" />
+      <InstallAppButton />
+
+      <div className="relative z-10 border-t border-espresso-line px-6 py-5">
         <div className="flex items-center gap-2 text-[11px] text-espresso-muted">
           <span className="relative flex h-1.5 w-1.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-credit opacity-60" />

@@ -7,6 +7,7 @@ import { formatKurus } from "@/lib/money";
 import { formatDateTime } from "@/lib/format";
 import { Money, Badge } from "@/components/ui";
 import { Modal } from "@/components/modal";
+import { ReconciliationPanel } from "@/components/reconciliation";
 import {
   EditPurchaseForm,
   type ListPurchase,
@@ -27,6 +28,7 @@ export function PurchaseModal({
   onClose: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, startTransition] = useTransition();
 
@@ -59,6 +61,11 @@ export function PurchaseModal({
           products={products}
           catalog={catalog}
           onDone={() => setEditing(false)}
+        />
+      ) : reconciling ? (
+        <ReconciliationPanel
+          source={{ type: "purchase", purchaseId: purchase.id }}
+          onClose={() => setReconciling(false)}
         />
       ) : (
         <div className="space-y-5">
@@ -136,6 +143,13 @@ export function PurchaseModal({
               className="rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-surface-2"
             >
               Düzenle
+            </button>
+            <button
+              type="button"
+              onClick={() => setReconciling(true)}
+              className="rounded-lg border border-[#25D366]/40 bg-[#25D366]/10 px-3 py-1.5 text-xs font-medium text-[#128C7E] transition-colors hover:bg-[#25D366]/20"
+            >
+              WhatsApp mutabakat
             </button>
             <Link
               href={`/suppliers/${purchase.supplierId}`}

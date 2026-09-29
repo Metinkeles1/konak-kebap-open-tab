@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { tlToKurus } from "@/lib/money";
+import { getPurchaseReconciliation, getBalanceReconciliation } from "@/lib/reconciliation";
 import {
   supplierCreateSchema,
   paymentCreateSchema,
@@ -507,7 +508,7 @@ export async function createPurchase(input: {
     }
   }
 
-  await prisma.$transaction(async (tx) => {
+  const purchaseId = await prisma.$transaction(async (tx) => {
     const resolved: {
       productPackageId: string;
       quantity: number;
@@ -591,7 +592,8 @@ export async function createPurchase(input: {
     const vatRate = normVatRate(input.vatRate);
     const vatAmount = computeVat(subtotal, vatRate);
 
-    await tx.purchase.create({
+    const created = await tx.purchase.create({
+      select: { id: true },
       data: {
         supplierId: input.supplierId,
         note: input.note,
@@ -619,6 +621,7 @@ export async function createPurchase(input: {
         data: { lastUnitPrice: item.unitPrice },
       });
     }
+    return created.id;
   }, {
     // Çok kalemli alış + uzak Neon'a onlarca gidiş-dönüş varsayılan 5 sn'yi
     // aşabiliyor; soğuk başlangıca da pay bırakacak şekilde cömert tutuyoruz.
@@ -627,6 +630,8 @@ export async function createPurchase(input: {
   });
 
   revalidateAll();
+  // Kaydın hemen ardından WhatsApp mutabakat penceresi bu kimlikle açılır.
+  return { id: purchaseId };
 }
 
 // Mevcut bir alışın düzenlenmesi (tam düzeltme).
@@ -755,4 +760,15 @@ export async function deletePurchase(fd: FormData) {
     data: { deletedAt: new Date() },
   });
   revalidateAll();
+}
+
+// --- WhatsApp mutabakat ---
+// Mesaj metni istemcide üretilir (kullanıcı göndermeden önce düzenleyebilsin);
+// bakiye/kalem verisi sunucuda ekstreyle aynı kuralla hesaplanır.
+export async function loadPurchaseReconciliation(purchaseId: string) {
+  return getPurchaseReconciliation(purchaseId);
+}
+
+export async function loadBalanceReconciliation(supplierId: string) {
+  return getBalanceReconciliation(supplierId);
 }

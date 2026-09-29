@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Fraunces } from "next/font/google";
 import { Sidebar } from "@/components/sidebar";
 import "./globals.css";
@@ -22,6 +22,15 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "Konak Kebap — Cari Takip",
   description: "Toptancı tedarik, alış ve cari borç takibi",
+  applicationName: "Konak Cari",
+  // iPhone'da "Ana Ekrana Ekle" → tam ekran uygulama gibi açılır.
+  appleWebApp: { capable: true, title: "Konak Cari", statusBarStyle: "black" },
+  formatDetection: { telephone: false },
+};
+
+// Tarayıcı/durum çubuğu rengi mobil üst barla (espresso) aynı.
+export const viewport: Viewport = {
+  themeColor: "#1a1512",
 };
 
 export default function RootLayout({
