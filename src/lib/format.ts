@@ -13,7 +13,7 @@ const dateTimeFmt = new Intl.DateTimeFormat("tr-TR", {
   minute: "2-digit",
 });
 
-export function formatDate(value: Date | string): string {
+export function formatDate(value: Date | string | number): string {
   return dateFmt.format(new Date(value));
 }
 

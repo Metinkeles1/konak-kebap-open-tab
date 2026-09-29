@@ -86,8 +86,8 @@ export default async function DashboardPage() {
           <Card
             title="⚠ Fiyat zammı uyarıları"
             action={
-              <Link href="/products" className="text-xs font-medium text-ember hover:underline">
-                Ürünler →
+              <Link href="/prices" className="text-xs font-medium text-ember hover:underline">
+                Fiyat takibi →
               </Link>
             }
           >
@@ -140,7 +140,15 @@ export default async function DashboardPage() {
         </Card>
 
         {/* Fiyat trendleri */}
-        <Card title="En çok zamlanan birimler" className="lg:col-span-2">
+        <Card
+          title="En çok zamlanan birimler"
+          className="lg:col-span-2"
+          action={
+            <Link href="/prices" className="text-xs font-medium text-ember hover:underline">
+              Tümü →
+            </Link>
+          }
+        >
           {trends.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted">
               Henüz yeterli fiyat geçmişi yok.
@@ -156,7 +164,10 @@ export default async function DashboardPage() {
                     <p className="truncate text-sm font-medium text-ink">
                       {t.productName}
                     </p>
-                    <p className="text-xs text-muted">{t.packageName}</p>
+                    <p className="truncate text-xs text-muted">
+                      {t.packageName}
+                      {t.supplierName ? ` · ${t.supplierName}` : ""}
+                    </p>
                   </div>
                   <Sparkline points={t.series} tone="debt" />
                   <div className="w-20 shrink-0 text-right">
