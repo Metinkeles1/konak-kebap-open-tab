@@ -8,12 +8,17 @@ import { CountEntryForm, type CountPackage } from "../count-entry-form";
 // adet yazar. Katalog klasik formla ORTAK kaynaktan (@/lib/catalog) gelir; burada
 // yalnızca PAKET (alış birimi) granülüne açılır ve sıklığa göre sıralanır.
 export default async function SayimPage() {
-  const suppliers = await prisma.supplier.findMany({
+  // Katalog sorguları toptancı listesini beklemeden aynı anda yola çıkar;
+  // id'ler yalnızca gruplama için loadCatalog içinde beklenir.
+  const suppliersQuery = prisma.supplier.findMany({
     where: { deletedAt: null },
     orderBy: { name: "asc" },
     select: { id: true, name: true, phone: true },
   });
-  const { catalog: byProduct } = await loadCatalog(suppliers.map((s) => s.id));
+  const [suppliers, { catalog: byProduct }] = await Promise.all([
+    suppliersQuery,
+    loadCatalog(suppliersQuery.then((s) => s.map((x) => x.id))),
+  ]);
 
   const catalog: Record<string, CountPackage[]> = {};
   // Birimi hiç tanımlanmamış ürünler sayım satırı olamaz (satır = alış birimi);

@@ -1,7 +1,7 @@
 <!-- BEGIN:nextjs-agent-rules -->
 # Next.js 16 — dikkat
 
-Bu proje Next.js 16.2.6 + React 19 kullanır; eğitim verindeki eski sürümlerden
+Bu proje Next.js 16.3.8 + React 19 kullanır; eğitim verindeki eski sürümlerden
 farklı olabilir. Next'e özgü bir API'ye (routing, route handler, server/client
 component, `next/*` importları, config) dokunmadan ÖNCE
 `node_modules/next/dist/docs/` içindeki ilgili rehberi oku. Sadece bizim kodumuzu
@@ -30,7 +30,17 @@ adapter `@prisma/adapter-pg`) · Neon Postgres · Zod 4 · Tailwind 4.
   `deletedAt: null` filtresini unutma.
 - **PurchaseItem.unitPrice DONDURULUR** — alış kalemine yazılan fiyat sonradan değişmez.
 - **API zarfı:** her route `{ data }` veya `{ error }` döner. Helper'ları kullan:
-  `ok / created / fail / handleError` ([src/lib/api.ts](src/lib/api.ts)).
+  `ok / changed / fail / handleError` ([src/lib/api.ts](src/lib/api.ts)). Veri
+  değiştiren uçlar `changed` döner (sayfaları da tazeler).
+- **Sayfalar statik + değişiklikte yenilenir:** server action'lar `revalidateAll()`,
+  API uçları `changed()` çağırır. Yeni bir yazma yolu eklersen bunu unutma.
+- **Mobil:** girişler telefonda ≥16px (`inputClass`), tablo yerine tek DOM'lu
+  duyarlı ızgara (bkz. ekstre, ürün listesi); gezinme alttaki sekme çubuğunda.
+- **Server action hataları DÖNDÜRÜLÜR, fırlatılmaz:** kullanıcıya mesaj gösterilecekse
+  `ActionResult` (`{ ok, data } | { ok: false, error }`) kullan ([src/app/actions.ts](src/app/actions.ts)).
+  Next production'da fırlatılan hatanın metnini gizler ("Minified React error #441").
+- **Zaman bazlı `export const revalidate` KOYMA:** Next 16.3'te kayıt sonrası tazeleme +
+  önyüklemeyle birleşince sayfanın önyükleme istekleri yanıtsız kalıyordu.
 - **Girdi doğrulama:** Zod şemaları [src/lib/validations.ts](src/lib/validations.ts) içinde.
 - Import alias `@/*` → `src/*`.
 

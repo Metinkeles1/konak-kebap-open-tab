@@ -21,7 +21,8 @@ export function NewProductForm({
   const [state, action] = useActionState(
     async (_prev: State, fd: FormData): Promise<State> => {
       try {
-        await createProduct(fd);
+        const res = await createProduct(fd);
+        if (!res.ok) return { error: res.error, ok: 0 };
         // Başarılı eklemede formu temizle (uncontrolled alanlar + birim state'i)
         formRef.current?.reset();
         setUnit("");

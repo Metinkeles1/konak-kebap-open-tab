@@ -6,7 +6,7 @@
 //  • Listede olmayan ürün → "+ Yeni ürün" → kind:"new"
 //  • İrsaliye toplamı çapraz-kontrolü ile yanlış okuma yakalanır.
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createPurchase, type NewPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
@@ -49,6 +49,135 @@ function nowLocal() {
 }
 const newNewRow = (): NewRow => ({ name: "", unit: "", baseCount: "", qty: "1", price: "" });
 
+const EMPTY_ROW: RowState = { qty: "", price: "" };
+
+// Satırın geçerli birim fiyatı (kuruş): yazılan fiyat, yoksa/okunamazsa son fiyat.
+function priceKurus(r: RowState | undefined, p: CountPackage): number | null {
+  if (r?.price.trim()) {
+    try { return tlToKurus(r.price); } catch { return p.lastPrice; }
+  }
+  return p.lastPrice;
+}
+
+// Yazılan fiyat son fiyattan %10+ farklıysa — irsaliyeyi yanlış okumuş olabilir.
+function isOutlier(r: RowState | undefined, p: CountPackage): boolean {
+  if (!r?.price.trim() || p.lastPrice == null || p.lastPrice <= 0) return false;
+  let v: number;
+  try { v = tlToKurus(r.price); } catch { return false; }
+  return Math.abs(v - p.lastPrice) / p.lastPrice >= 0.1;
+}
+
+const fmtBase = (p: CountPackage) =>
+  p.baseCount > 1 && p.lastPrice != null
+    ? `1 ${p.unit} = ${p.baseCount} adet · birim başı ${formatKurus(Math.round(p.lastPrice / p.baseCount))}`
+    : `birim: ${p.unit}`;
+
+// Tek sayım satırı. memo + kararlı callback'ler sayesinde bir adete yazınca
+// YALNIZCA o satır yeniden çizilir. Eskiden her tuşta tüm liste (yüzlerce satır,
+// her birinde birkaç para biçimlendirme) yeniden render ediliyor, telefonda
+// yazarken belirgin gecikme oluyordu.
+// Not: modül düzeyinde tanımlı — bileşen içinde tanımlansaydı her render'da yeni
+// tip oluşur, satır remount edilir ve input odağı her tuşta kaybolurdu.
+const CountRow = memo(function CountRow({
+  p,
+  row,
+  onPatch,
+  onEnter,
+  registerQty,
+}: {
+  p: CountPackage;
+  row: RowState | undefined;
+  onPatch: (id: string, patch: Partial<RowState>) => void;
+  onEnter: (id: string) => void;
+  registerQty: (id: string, el: HTMLInputElement | null) => void;
+}) {
+  const r = row ?? EMPTY_ROW;
+  const qty = toQty(r.qty);
+  const on = qty > 0;
+  const line = Math.round((priceKurus(r, p) ?? 0) * qty);
+  const outlier = isOutlier(r, p);
+  const pricePlaceholder = p.lastPrice != null ? formatKurus(p.lastPrice).replace("₺", "").trim() : "fiyat";
+  return (
+    <div
+      className={`cv-row grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-2 rounded-lg border px-2.5 py-2 transition sm:grid-cols-[minmax(0,1fr)_120px_76px_104px] sm:px-3 ${
+        on ? "border-ember/40 bg-ember-soft/50" : "border-transparent hover:bg-surface-2"
+      }`}
+    >
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-ink">{p.productName}</span>
+          <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{p.unit}</span>
+        </div>
+        <p className="mt-0.5 truncate text-[11px] text-muted">{fmtBase(p)}</p>
+
+        {/* Mobil: satır aktifken kompakt fiyat + tutar (masaüstünde ayrı sütunlar) */}
+        {on && (
+          <div className="mt-1.5 flex items-center gap-1.5 sm:hidden">
+            <input
+              inputMode="decimal"
+              value={r.price}
+              onChange={(e) => onPatch(p.packageId, { price: e.target.value })}
+              placeholder={pricePlaceholder}
+              title="Son fiyat ön-dolu. Değişmediyse boş bırak."
+              className={`nums w-24 rounded-md border bg-surface px-2 py-1 text-right text-base text-ink outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15 ${
+                outlier ? "border-debt/60 ring-2 ring-debt/15" : "border-line"
+              }`}
+            />
+            <span className="text-[11px] text-muted">× {fmtQty(qty)} =</span>
+            <span className="nums text-xs font-semibold text-ink">{formatKurus(line)}</span>
+            {outlier && (
+              <span title="Son fiyattan %10+ farklı" className="text-[11px] font-bold text-debt">?</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Fiyat — son fiyat ön-dolu (masaüstü sütunu) */}
+      <div className="relative hidden sm:block">
+        <input
+          inputMode="decimal"
+          value={r.price}
+          onChange={(e) => onPatch(p.packageId, { price: e.target.value })}
+          placeholder={pricePlaceholder}
+          title="Son fiyat ön-dolu. Değişmediyse boş bırak."
+          className={`${field} nums text-right ${outlier ? "border-debt/60 ring-2 ring-debt/15" : ""}`}
+        />
+        {outlier && (
+          <span
+            title="Son fiyattan %10+ farklı — yanlış okumuş olabilir misin?"
+            className="pointer-events-none absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-debt text-[10px] font-bold text-white"
+          >
+            ?
+          </span>
+        )}
+      </div>
+
+      {/* Adet — asıl alan. enterKeyHint: telefon klavyesinde "İleri" tuşu. */}
+      <input
+        ref={(el) => registerQty(p.packageId, el)}
+        inputMode="decimal"
+        enterKeyHint="next"
+        value={r.qty}
+        onChange={(e) => onPatch(p.packageId, { qty: e.target.value })}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onEnter(p.packageId); } }}
+        onFocus={(e) => e.currentTarget.select()}
+        placeholder="0"
+        aria-label={`${p.productName} · ${p.unit} adet`}
+        className={`${field} nums self-start text-center text-base font-semibold sm:self-auto ${on ? "border-ember/50" : ""}`}
+      />
+
+      {/* Tutar — geniş ekranda */}
+      <div className="hidden text-right sm:block">
+        {on ? (
+          <span className="nums text-sm font-semibold text-ink">{formatKurus(line)}</span>
+        ) : (
+          <span className="text-sm text-muted/50">—</span>
+        )}
+      </div>
+    </div>
+  );
+});
+
 export function CountEntryForm({
   suppliers,
   catalog,
@@ -72,6 +201,9 @@ export function CountEntryForm({
   // Kayıttan sonra açılan WhatsApp mutabakat penceresi.
   const [recon, setRecon] = useState<{ id: string; supplierName: string; note: string } | null>(null);
   const [pending, startTransition] = useTransition();
+  // Telefonda alt paneldeki KDV / irsaliye / WhatsApp bölümü açık mı?
+  const [checksOpen, setChecksOpen] = useState(false);
+  const checksId = useId();
 
   const products = useMemo(() => (supplierId ? catalog[supplierId] ?? [] : []), [supplierId, catalog]);
   // Birimi olmayan ürünler: satır olarak listelenemez, tıklayınca adı dolu
@@ -87,28 +219,34 @@ export function CountEntryForm({
   const freqRows = visible.filter((p) => p.freq);
   const otherRows = visible.filter((p) => !p.freq);
 
-  const priceKurus = (r: RowState, p: CountPackage): number | null => {
-    if (r.price.trim()) {
-      try { return tlToKurus(r.price); } catch { return p.lastPrice; }
-    }
-    return p.lastPrice;
-  };
-
-  // Klavye: görünür satırların adet inputları
+  // Klavye: görünür satırların adet inputları. Satırlara verilen callback'ler
+  // kararlı (useCallback) olmalı ki memo'lu CountRow gereksiz yere çizilmesin;
+  // güncel görünür liste bu yüzden ref üzerinden okunur.
   const qtyRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  function focusNext(currentId: string) {
-    const idx = visible.findIndex((p) => p.packageId === currentId);
-    for (let i = idx + 1; i < visible.length; i++) {
-      const el = qtyRefs.current[visible[i].packageId];
+  const visibleRef = useRef(visible);
+  useEffect(() => {
+    visibleRef.current = visible;
+  }, [visible]);
+
+  const focusNext = useCallback((currentId: string) => {
+    const list = visibleRef.current;
+    const idx = list.findIndex((p) => p.packageId === currentId);
+    for (let i = idx + 1; i < list.length; i++) {
+      const el = qtyRefs.current[list[i].packageId];
       if (el) { el.focus(); el.select(); return; }
     }
-  }
+  }, []);
 
-  const patch = (id: string, p: Partial<RowState>) =>
-    setRows((rs) => {
-      const cur = rs[id] ?? { qty: "", price: "" };
-      return { ...rs, [id]: { ...cur, ...p } };
-    });
+  const registerQty = useCallback((id: string, el: HTMLInputElement | null) => {
+    qtyRefs.current[id] = el;
+  }, []);
+
+  // Yalnızca değişen satırın nesnesi yenilenir; diğerleri aynı referansla kalır.
+  const patch = useCallback(
+    (id: string, p: Partial<RowState>) =>
+      setRows((rs) => ({ ...rs, [id]: { ...(rs[id] ?? EMPTY_ROW), ...p } })),
+    [],
+  );
 
   function changeSupplier(id: string) {
     setSupplierId(id);
@@ -149,19 +287,6 @@ export function CountEntryForm({
     : null;
   const diff = invKurus != null ? total - invKurus : null;
   const matched = diff === 0;
-
-  const outlier = (p: CountPackage) => {
-    const r = rows[p.packageId];
-    if (!r?.price.trim() || p.lastPrice == null || p.lastPrice <= 0) return false;
-    let v: number;
-    try { v = tlToKurus(r.price); } catch { return false; }
-    return Math.abs(v - p.lastPrice) / p.lastPrice >= 0.1;
-  };
-
-  const fmtBase = (p: CountPackage) =>
-    p.baseCount > 1 && p.lastPrice != null
-      ? `1 ${p.unit} = ${p.baseCount} adet · birim başı ${formatKurus(Math.round(p.lastPrice / p.baseCount))}`
-      : `birim: ${p.unit}`;
 
   // WhatsApp sipariş mesajı — girilen kalemler: ürün + adet + son bilinen fiyat.
   const supplier = suppliers.find((s) => s.id === supplierId);
@@ -228,7 +353,9 @@ export function CountEntryForm({
 
     startTransition(async () => {
       try {
-        const { id } = await createPurchase({ supplierId, note, date, vatRate, items });
+        const res = await createPurchase({ supplierId, note, date, vatRate, items });
+        if (!res.ok) return setError(res.error);
+        const { id } = res.data;
         setRows({});
         setNewRows([]);
         setInvoiceTotal("");
@@ -246,93 +373,25 @@ export function CountEntryForm({
     });
   }
 
-  // Satırı NESTED COMPONENT olarak değil, inline fonksiyon olarak render et:
-  // aksi halde her render'da yeni bileşen tipi oluşup React satırı remount eder
-  // ve input odağı her tuşta kaybolur.
-  const renderRow = (p: CountPackage) => {
-    const r = rows[p.packageId] ?? { qty: "", price: "" };
-    const qty = toQty(r.qty);
-    const on = qty > 0;
-    const line = Math.round((priceKurus(r, p) ?? 0) * qty);
-    return (
-      <div
-        key={p.packageId}
-        className={`grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-2 rounded-lg border px-2.5 py-2 transition sm:grid-cols-[minmax(0,1fr)_120px_76px_104px] sm:px-3 ${
-          on ? "border-ember/40 bg-ember-soft/50" : "border-transparent hover:bg-surface-2"
-        }`}
-      >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-ink">{p.productName}</span>
-            <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{p.unit}</span>
-          </div>
-          <p className="mt-0.5 truncate text-[11px] text-muted">{fmtBase(p)}</p>
-
-          {/* Mobil: satır aktifken kompakt fiyat + tutar (masaüstünde ayrı sütunlar) */}
-          {on && (
-            <div className="mt-1.5 flex items-center gap-1.5 sm:hidden">
-              <input
-                inputMode="decimal"
-                value={r.price}
-                onChange={(e) => patch(p.packageId, { price: e.target.value })}
-                placeholder={p.lastPrice != null ? formatKurus(p.lastPrice).replace("₺", "").trim() : "fiyat"}
-                title="Son fiyat ön-dolu. Değişmediyse boş bırak."
-                className={`nums w-24 rounded-md border bg-surface px-2 py-1 text-right text-xs text-ink outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15 ${
-                  outlier(p) ? "border-debt/60 ring-2 ring-debt/15" : "border-line"
-                }`}
-              />
-              <span className="text-[11px] text-muted">× {fmtQty(qty)} =</span>
-              <span className="nums text-xs font-semibold text-ink">{formatKurus(line)}</span>
-              {outlier(p) && (
-                <span title="Son fiyattan %10+ farklı" className="text-[11px] font-bold text-debt">?</span>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Fiyat — son fiyat ön-dolu (masaüstü sütunu) */}
-        <div className="relative hidden sm:block">
-          <input
-            inputMode="decimal"
-            value={r.price}
-            onChange={(e) => patch(p.packageId, { price: e.target.value })}
-            placeholder={p.lastPrice != null ? formatKurus(p.lastPrice).replace("₺", "").trim() : "fiyat"}
-            title="Son fiyat ön-dolu. Değişmediyse boş bırak."
-            className={`${field} nums text-right ${outlier(p) ? "border-debt/60 ring-2 ring-debt/15" : ""}`}
-          />
-          {outlier(p) && (
-            <span
-              title="Son fiyattan %10+ farklı — yanlış okumuş olabilir misin?"
-              className="pointer-events-none absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-debt text-[10px] font-bold text-white"
-            >
-              ?
-            </span>
-          )}
-        </div>
-
-        {/* Adet — asıl alan */}
-        <input
-          ref={(el) => { qtyRefs.current[p.packageId] = el; }}
-          inputMode="decimal"
-          value={r.qty}
-          onChange={(e) => patch(p.packageId, { qty: e.target.value })}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNext(p.packageId); } }}
-          onFocus={(e) => e.currentTarget.select()}
-          placeholder="0"
-          className={`${field} nums self-start text-center text-base font-semibold sm:self-auto ${on ? "border-ember/50" : ""}`}
-        />
-
-        {/* Tutar — geniş ekranda */}
-        <div className="hidden text-right sm:block">
-          {on ? (
-            <span className="nums text-sm font-semibold text-ink">{formatKurus(line)}</span>
-          ) : (
-            <span className="text-sm text-muted/50">—</span>
-          )}
-        </div>
-      </div>
-    );
-  };
+  // Kaydet düğmesi iki yerde: telefonda alt panelin ilk satırında, geniş ekranda
+  // aksiyonların sonunda (biri her zaman gizli). `display` sınıfını (inline-flex /
+  // hidden) çağıran verir — tabanda olsaydı `hidden` ile çakışır, ikisi de görünürdü.
+  const saveButton = (className: string) => (
+    <button
+      type="button"
+      onClick={submit}
+      disabled={pending || itemCount === 0}
+      className={`items-center justify-center gap-1.5 rounded-lg bg-ink px-4 text-sm font-medium text-paper transition-colors hover:bg-ink-soft active:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50 sm:px-5 sm:py-2 ${className}`}
+    >
+      {pending && <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />}
+      {pending ? "Kaydediliyor…" : (
+        <>
+          <span className="sm:hidden">Kaydet</span>
+          <span className="hidden sm:inline">Alışı kaydet</span>
+        </>
+      )}
+    </button>
+  );
 
   return (
     <div>
@@ -398,7 +457,9 @@ export function CountEntryForm({
           {freqRows.length > 0 && (
             <>
               <p className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-ember/80">Sık alınanlar</p>
-              {freqRows.map((p) => renderRow(p))}
+              {freqRows.map((p) => (
+                <CountRow key={p.packageId} p={p} row={rows[p.packageId]} onPatch={patch} onEnter={focusNext} registerQty={registerQty} />
+              ))}
             </>
           )}
           {otherRows.length > 0 && (
@@ -406,7 +467,9 @@ export function CountEntryForm({
               {freqRows.length > 0 && (
                 <p className="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-muted">Diğer ürünler</p>
               )}
-              {otherRows.map((p) => renderRow(p))}
+              {otherRows.map((p) => (
+                <CountRow key={p.packageId} p={p} row={rows[p.packageId]} onPatch={patch} onEnter={focusNext} registerQty={registerQty} />
+              ))}
             </>
           )}
           {products.length > 0 && visible.length === 0 && (
@@ -505,93 +568,125 @@ export function CountEntryForm({
       {error && <p className="mt-4 rounded-lg bg-debt-soft px-3 py-2 text-sm text-debt">{error}</p>}
       {ok && <p className="mt-4 rounded-lg bg-credit-soft px-3 py-2 text-sm text-credit">{ok}</p>}
 
-      {/* Alt özet + çapraz-kontrol — responsive */}
+      {/* Alt özet + çapraz-kontrol.
+          Telefonda tek ince satır: kalem · toplam · [Kontrol] · [Kaydet]. KDV,
+          irsaliye ve WhatsApp "Kontrol" ile açılır — eskiden panel boşken bile
+          ekranın ~%35'ini kaplıyor, klavye açıkken listeye yer kalmıyordu.
+          İrsaliye girildiyse "tutuyor / fark" rozeti kapalıyken de görünür.
+          Geniş ekranda her şey tek satırda, her zaman açık. */}
       <div className="sticky bottom-0 z-30 mt-4 rounded-card border border-line bg-surface shadow-pop">
-        <div className="p-3.5 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 sm:p-4 sm:px-5">
-          {/* Toplam */}
-          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-            <span className="text-sm text-muted">
-              <span className="nums font-semibold text-ink">{itemCount}</span> kalem
-            </span>
-            <span className="text-sm text-muted">·</span>
-            <span className="text-sm text-muted">{vatAmount > 0 ? "Genel toplam" : "Toplam"}</span>
-            <span className="nums text-xl font-semibold text-ink">{formatKurus(total)}</span>
-            {vatAmount > 0 && (
-              <span className="nums text-[11px] text-muted">
-                ({formatKurus(subtotal)} + KDV %{vatRate} {formatKurus(vatAmount)})
+        <div className="p-3 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 sm:p-4 sm:px-5">
+          {/* Satır 1 — telefonda toplam + düğmeler; geniş ekranda `contents` ile akışa katılır */}
+          <div className="flex items-center gap-2 sm:contents">
+            <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5 gap-y-0.5 sm:flex-none">
+              <span className="text-xs text-muted sm:text-sm">
+                <span className="nums font-semibold text-ink">{itemCount}</span> kalem
               </span>
-            )}
-          </div>
-
-          {/* KDV + İrsaliye — mobilde iki sütun tek satır (etiket üstte), geniş ekranda yan yana */}
-          <div className="mt-3 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 sm:mt-0 sm:ml-auto sm:flex sm:flex-wrap sm:items-center sm:gap-x-6">
-            <label className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-              <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wider text-muted">KDV %</span>
-              <input
-                inputMode="numeric"
-                value={vat}
-                onChange={(e) => setVat(e.target.value)}
-                placeholder="ops."
-                title="Opsiyonel. Boş = KDV yok. İrsaliye toplamı KDV dahil karşılaştırılır."
-                className={`${field} nums text-right sm:w-16`}
-              />
-            </label>
-
-            {/* İrsaliye çapraz-kontrolü */}
-            <label className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-              <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wider text-muted">
-                İrsaliye toplamı
-              </span>
-              <span className="flex items-center gap-2">
-                <input
-                  inputMode="decimal"
-                  value={invoiceTotal}
-                  onChange={(e) => setInvoiceTotal(e.target.value)}
-                  placeholder="örn. 10.935"
-                  className={`${field} nums min-w-0 text-right sm:w-32 ${
-                    invKurus == null ? "" : matched ? "border-credit/50 ring-2 ring-credit/15" : "border-debt/50 ring-2 ring-debt/15"
+              <span className="hidden text-sm text-muted sm:inline">·</span>
+              <span className="hidden text-sm text-muted sm:inline">{vatAmount > 0 ? "Genel toplam" : "Toplam"}</span>
+              <span className="nums text-lg font-semibold text-ink sm:text-xl">{formatKurus(total)}</span>
+              {vatAmount > 0 && (
+                <span className="nums hidden text-[11px] text-muted sm:inline">
+                  ({formatKurus(subtotal)} + KDV %{vatRate} {formatKurus(vatAmount)})
+                </span>
+              )}
+              {invKurus != null && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium sm:hidden ${
+                    matched ? "bg-credit-soft text-credit" : "bg-debt-soft text-debt"
                   }`}
-                />
-                {invKurus != null &&
-                  (matched ? (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-credit-soft px-2.5 py-1 text-xs font-medium text-credit">
-                      ✓ Tutuyor
-                    </span>
-                  ) : (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-debt-soft px-2.5 py-1 text-xs font-medium text-debt">
-                      Fark {formatKurus(Math.abs(diff!))}
-                    </span>
-                  ))}
+                >
+                  {matched ? "✓ irsaliye" : `Fark ${formatKurus(Math.abs(diff!))}`}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setChecksOpen((v) => !v)}
+              aria-expanded={checksOpen}
+              aria-controls={checksId}
+              className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-line px-3 text-sm font-medium text-ink-soft active:bg-surface-2 sm:hidden"
+            >
+              Kontrol
+              <span aria-hidden className={`text-xs transition-transform ${checksOpen ? "rotate-180" : ""}`}>
+                ▴
               </span>
-            </label>
+            </button>
+            {saveButton("inline-flex h-10 shrink-0 sm:hidden")}
           </div>
 
-          {/* Aksiyonlar */}
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:gap-2">
-            {/* WhatsApp ile sipariş — mobilde tam genişlik, üstte */}
-            <WhatsAppButton
-              phone={supplier?.phone}
-              text={orderText}
-              disabled={itemCount === 0}
-              className="col-span-2 sm:order-2 sm:col-span-1"
-            />
-            <button
-              type="button"
-              onClick={() => changeSupplier(supplierId)}
-              disabled={pending}
-              className="rounded-lg border border-line px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-50 sm:order-1 sm:border-transparent"
-            >
-              Sıfırla
-            </button>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={pending || itemCount === 0}
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-5 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50 sm:order-3"
-            >
-              {pending && <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />}
-              {pending ? "Kaydediliyor…" : "Alışı kaydet"}
-            </button>
+          {/* Açılır bölüm (telefon) / her zaman açık (geniş ekran) */}
+          <div
+            id={checksId}
+            className={`${checksOpen ? "mt-3 grid" : "hidden"} gap-3 border-t border-line pt-3 sm:ml-auto sm:mt-0 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:border-0 sm:pt-0`}
+          >
+            {vatAmount > 0 && (
+              <p className="nums text-[11px] text-muted sm:hidden">
+                Ara toplam {formatKurus(subtotal)} + KDV %{vatRate} {formatKurus(vatAmount)}
+              </p>
+            )}
+
+            {/* KDV + İrsaliye — telefonda iki sütun (etiket üstte), geniş ekranda yan yana */}
+            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6">
+              <label className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wider text-muted">KDV %</span>
+                <input
+                  inputMode="numeric"
+                  value={vat}
+                  onChange={(e) => setVat(e.target.value)}
+                  placeholder="ops."
+                  title="Opsiyonel. Boş = KDV yok. İrsaliye toplamı KDV dahil karşılaştırılır."
+                  className={`${field} nums text-right sm:w-16`}
+                />
+              </label>
+
+              {/* İrsaliye çapraz-kontrolü */}
+              <label className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wider text-muted">
+                  İrsaliye toplamı
+                </span>
+                <span className="flex items-center gap-2">
+                  <input
+                    inputMode="decimal"
+                    value={invoiceTotal}
+                    onChange={(e) => setInvoiceTotal(e.target.value)}
+                    placeholder="örn. 10.935"
+                    className={`${field} nums min-w-0 text-right sm:w-32 ${
+                      invKurus == null ? "" : matched ? "border-credit/50 ring-2 ring-credit/15" : "border-debt/50 ring-2 ring-debt/15"
+                    }`}
+                  />
+                  {invKurus != null &&
+                    (matched ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-credit-soft px-2.5 py-1 text-xs font-medium text-credit">
+                        ✓ Tutuyor
+                      </span>
+                    ) : (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-debt-soft px-2.5 py-1 text-xs font-medium text-debt">
+                        Fark {formatKurus(Math.abs(diff!))}
+                      </span>
+                    ))}
+                </span>
+              </label>
+            </div>
+
+            {/* Aksiyonlar */}
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:gap-2">
+              <WhatsAppButton
+                phone={supplier?.phone}
+                text={orderText}
+                disabled={itemCount === 0}
+                className="sm:order-2"
+              />
+              <button
+                type="button"
+                onClick={() => changeSupplier(supplierId)}
+                disabled={pending}
+                className="rounded-lg border border-line px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-50 sm:order-1 sm:border-transparent"
+              >
+                Sıfırla
+              </button>
+              {saveButton("hidden sm:inline-flex sm:order-3")}
+            </div>
           </div>
         </div>
       </div>

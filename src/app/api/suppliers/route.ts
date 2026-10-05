@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { ok, created, handleError } from "@/lib/api";
+import { ok, changed, handleError } from "@/lib/api";
 import { supplierCreateSchema } from "@/lib/validations";
 import type { SupplierBalance } from "@/lib/balance";
 
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const data = supplierCreateSchema.parse(body);
     const supplier = await prisma.supplier.create({ data });
-    return created(supplier);
+    return changed(supplier, 201);
   } catch (err) {
     return handleError(err);
   }

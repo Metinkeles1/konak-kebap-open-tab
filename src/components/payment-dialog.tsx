@@ -34,13 +34,11 @@ export function PaymentDialog({
   }
 
   async function submit(fd: FormData) {
-    try {
-      await createPayment(fd);
-      close();
-    } catch {
-      // Geçersiz tutar vb. — sayfayı hata ekranına düşürmek yerine pencerede göster
-      setError("Ödeme kaydedilemedi. Tutarı kontrol edin (ör. 1500 veya 1500,50).");
-    }
+    // Hata fırlatılmaz, değer olarak döner (bkz. actions.ts ActionResult) —
+    // geçersiz tutarda sebebi pencerede gösterilir.
+    const res = await createPayment(fd);
+    if (res.ok) close();
+    else setError(`${res.error} — örnek: 1500 veya 1500,50`);
   }
 
   return (
@@ -48,7 +46,7 @@ export function PaymentDialog({
       <button
         type="button"
         onClick={open}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-ember px-4 py-2 text-sm font-medium text-white shadow-card transition-colors hover:bg-ember-bright"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ember px-4 py-2.5 text-sm font-medium text-white shadow-card transition-colors hover:bg-ember-bright active:bg-ember-bright sm:py-2"
       >
         <span className="text-base leading-none">+</span> Ödeme ekle
       </button>

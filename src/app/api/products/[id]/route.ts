@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { ok, fail, handleError } from "@/lib/api";
+import { ok, changed, fail, handleError } from "@/lib/api";
 import { productUpdateSchema } from "@/lib/validations";
 
 type Params = { params: Promise<{ id: string }> };
@@ -41,7 +41,7 @@ export async function PUT(req: Request, { params }: Params) {
         defaultSupplierId: parsed.defaultSupplierId,
       },
     });
-    return ok(product);
+    return changed(product);
   } catch (err) {
     return handleError(err);
   }
@@ -60,7 +60,7 @@ export async function DELETE(_req: Request, { params }: Params) {
       where: { id },
       data: { deletedAt: new Date() },
     });
-    return ok({ id, deleted: true });
+    return changed({ id, deleted: true });
   } catch (err) {
     return handleError(err);
   }

@@ -7,12 +7,16 @@ import type { ListPurchase } from "./edit-purchase-form";
 import { loadCatalog } from "@/lib/catalog";
 
 export default async function PurchasesPage() {
-  const [suppliers, purchases] = await Promise.all([
-    prisma.supplier.findMany({
-      where: { deletedAt: null },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, phone: true },
-    }),
+  const suppliersQuery = prisma.supplier.findMany({
+    where: { deletedAt: null },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, phone: true },
+  });
+  // Ürün kataloğu sayım moduyla ORTAK kaynaktan — iki form aynı ürünleri görür.
+  // Tüm sorgular aynı anda yola çıkar; katalog toptancı id'lerini yalnızca
+  // gruplama için (kendi içinde) bekler.
+  const [suppliers, purchases, { catalog, allProducts }] = await Promise.all([
+    suppliersQuery,
     prisma.purchase.findMany({
       where: { deletedAt: null },
       orderBy: { date: "desc" },
@@ -22,9 +26,8 @@ export default async function PurchasesPage() {
         items: { include: { package: { include: { product: true } } } },
       },
     }),
+    loadCatalog(suppliersQuery.then((s) => s.map((x) => x.id))),
   ]);
-  // Ürün kataloğu sayım moduyla ORTAK kaynaktan — iki form aynı ürünleri görür.
-  const { catalog, allProducts } = await loadCatalog(suppliers.map((s) => s.id));
 
   // Liste/düzenleme için serileştirilebilir alış verisi
   const clientPurchases: ListPurchase[] = purchases.map((p) => {

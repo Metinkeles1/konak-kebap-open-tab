@@ -26,7 +26,25 @@ function isIos() {
   return /iphone|ipad|ipod/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
 }
 
-export function InstallAppButton() {
+// iPhone'da programla kurulum yok; elle ekleme adımları.
+function IosSteps() {
+  return (
+    <>
+      <li>
+        1. Safari&apos;de alttaki <span className="font-semibold text-white">Paylaş</span>{" "}
+        düğmesine (□↑) dokun.
+      </li>
+      <li>
+        2. <span className="font-semibold text-white">Ana Ekrana Ekle</span>&apos;yi seç.
+      </li>
+      <li>3. Konak Cari simgesi ana ekranına gelir; oradan aç.</li>
+    </>
+  );
+}
+
+// variant: "sidebar" = masaüstü kenar çubuğunda geniş düğme;
+//          "compact" = mobil üst barda küçük hap düğme (adımlar açılır kutuda).
+export function InstallAppButton({ variant = "sidebar" }: { variant?: "sidebar" | "compact" }) {
   const standalone = useSyncExternalStore(noopSubscribe, isStandalone, () => true);
   const ios = useSyncExternalStore(noopSubscribe, isIos, () => false);
   const [deferred, setDeferred] = useState<InstallPromptEvent | null>(null);
@@ -58,6 +76,27 @@ export function InstallAppButton() {
     }
   }
 
+  if (variant === "compact") {
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          onClick={install}
+          aria-expanded={ios ? showIosHelp : undefined}
+          className="flex h-8 items-center gap-1.5 rounded-full border border-espresso-line px-3 text-xs font-medium text-espresso-text/90 transition-colors active:bg-espresso-2"
+        >
+          <span className="text-ember-bright">⤓</span>
+          Yükle
+        </button>
+        {showIosHelp && (
+          <ol className="absolute right-0 top-full z-50 mt-2 w-64 space-y-1.5 rounded-lg border border-espresso-line bg-espresso-2 px-3 py-2.5 text-xs leading-relaxed text-espresso-text/85 shadow-pop">
+            <IosSteps />
+          </ol>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="relative z-10 mx-3 mb-3">
       <button
@@ -70,14 +109,7 @@ export function InstallAppButton() {
       </button>
       {showIosHelp && (
         <ol className="mt-2 space-y-1.5 rounded-lg bg-espresso-2 px-3 py-2.5 text-xs leading-relaxed text-espresso-text/85">
-          <li>
-            1. Safari&apos;de alttaki <span className="font-semibold text-white">Paylaş</span>{" "}
-            düğmesine (□↑) dokun.
-          </li>
-          <li>
-            2. <span className="font-semibold text-white">Ana Ekrana Ekle</span>&apos;yi seç.
-          </li>
-          <li>3. Konak Cari simgesi ana ekranına gelir; oradan aç.</li>
+          <IosSteps />
         </ol>
       )}
     </div>

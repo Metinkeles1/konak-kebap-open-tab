@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { ok, created, fail, handleError } from "@/lib/api";
+import { ok, changed, fail, handleError } from "@/lib/api";
 import { purchaseCreateSchema } from "@/lib/validations";
 
 // GET /api/purchases — (silinmemiş) alışlar. ?supplierId=... ile filtrelenebilir.
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
       return row;
     });
 
-    return created(purchase);
+    return changed(purchase, 201);
   } catch (err) {
     return handleError(err);
   }

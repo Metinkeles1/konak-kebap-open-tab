@@ -20,8 +20,12 @@ export type CatalogUnit = {
 export type CatalogProduct = { productId: string; name: string; units: CatalogUnit[] };
 export type SupplierCatalog = Record<string, CatalogProduct[]>;
 
-export async function loadCatalog(supplierIds: string[]) {
-  const [products, latestPrices, counts] = await Promise.all([
+// supplierIds bir Promise de olabilir: aşağıdaki sorgular id'lere bağlı değildir
+// (id'ler yalnızca sonucu toptancı bazında gruplamak için gerekir). Böylece sayfa,
+// toptancı listesini beklemeden katalog sorgularını aynı anda başlatabilir.
+export async function loadCatalog(supplierIdsInput: string[] | Promise<string[]>) {
+  const [supplierIds, products, latestPrices, counts] = await Promise.all([
+    supplierIdsInput,
     prisma.product.findMany({
       where: { deletedAt: null },
       orderBy: { name: "asc" },

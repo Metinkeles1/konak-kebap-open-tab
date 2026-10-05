@@ -44,6 +44,8 @@ const field =
 
 const lc = (s: string) => s.trim().toLocaleLowerCase("tr");
 
+const MAX_MATCHES = 50;
+
 // Adet metnini sayıya çevir — kg için ondalık olabilir ("2,5" → 2.5)
 const toQty = (s: string) => {
   const n = Number(s.trim().replace(",", "."));
@@ -94,6 +96,10 @@ export function NewPurchaseForm({
     const extra = allProducts.filter((p) => !have.has(p.productId));
     return [...scoped, ...extra].sort((a, b) => a.name.localeCompare(b.name, "tr"));
   }, [supplierId, showAll, catalog, allProducts]);
+
+  // Arama için küçük harfli adlar bir kez hesaplanır (her tuşta, her satırda
+  // tüm ürünleri yeniden toLocaleLowerCase'e sokmak yerine).
+  const searchIndex = useMemo(() => products.map((p) => ({ p, key: lc(p.name) })), [products]);
 
   const findProduct = (row: Row) => products.find((p) => p.productId === row.productId);
   function selectedPkg(row: Row): Unit | undefined {
@@ -200,7 +206,9 @@ export function NewPurchaseForm({
 
     startTransition(async () => {
       try {
-        const { id } = await createPurchase({ supplierId, note, date, vatRate, items: payload });
+        const res = await createPurchase({ supplierId, note, date, vatRate, items: payload });
+        if (!res.ok) return setError(res.error);
+        const { id } = res.data;
         setRecon({
           id,
           supplierName: supplier?.name ?? "",
@@ -291,8 +299,16 @@ export function NewPurchaseForm({
             <div className="space-y-2">
               {rows.map((row, idx) => {
                 const q = lc(row.query);
-                const matches = q ? products.filter((p) => lc(p.name).includes(q)) : products;
-                const exact = products.some((p) => lc(p.name) === q);
+                // Açılır listede en çok MAX_MATCHES öneri çizilir; telefonda yüzlerce
+                // düğmeyi her tuşta çizmek gecikme yaratıyordu. Daha fazlası için yazmaya devam.
+                const matches: CatalogProduct[] = [];
+                let exact = false;
+                if (row.open) {
+                  for (const { p, key } of searchIndex) {
+                    if (key === q) exact = true;
+                    if ((!q || key.includes(q)) && matches.length < MAX_MATCHES) matches.push(p);
+                  }
+                }
                 const product = findProduct(row);
                 const pkg = selectedPkg(row);
                 const unitActive = row.isNewProduct || !!row.productId;
@@ -333,7 +349,7 @@ export function NewPurchaseForm({
                                 type="button"
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => pickProduct(idx, p)}
-                                className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-surface-2"
+                                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm hover:bg-surface-2 active:bg-surface-2 sm:py-1.5"
                               >
                                 <span className="truncate text-ink">{p.name}</span>
                                 <span className="shrink-0 text-xs text-muted">{p.units.map((u) => u.unit).join(", ")}</span>

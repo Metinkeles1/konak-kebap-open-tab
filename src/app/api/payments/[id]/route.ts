@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { ok, fail, handleError } from "@/lib/api";
+import { ok, changed, fail, handleError } from "@/lib/api";
 import { paymentUpdateSchema } from "@/lib/validations";
 
 type Params = { params: Promise<{ id: string }> };
@@ -30,7 +30,7 @@ export async function PUT(req: Request, { params }: Params) {
 
     const data = paymentUpdateSchema.parse(await req.json());
     const payment = await prisma.payment.update({ where: { id }, data });
-    return ok(payment);
+    return changed(payment);
   } catch (err) {
     return handleError(err);
   }
@@ -49,7 +49,7 @@ export async function DELETE(_req: Request, { params }: Params) {
       where: { id },
       data: { deletedAt: new Date() },
     });
-    return ok({ id, deleted: true });
+    return changed({ id, deleted: true });
   } catch (err) {
     return handleError(err);
   }

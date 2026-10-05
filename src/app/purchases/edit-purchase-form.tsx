@@ -180,7 +180,8 @@ export function EditPurchaseForm({
 
     startTransition(async () => {
       try {
-        await updatePurchase({ id: purchase.id, supplierId, date, note, vatRate, items });
+        const res = await updatePurchase({ id: purchase.id, supplierId, date, note, vatRate, items });
+        if (!res.ok) return setError(res.error);
         onDone();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Hata oluştu");

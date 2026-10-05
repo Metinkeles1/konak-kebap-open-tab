@@ -13,6 +13,12 @@ import {
 import { PageHeader, Card, Stat, EmptyState } from "@/components/ui";
 import { BarList, Sparkline, TrendDelta, MiniBars } from "@/components/charts";
 
+// Sayfa statik üretilir ve her kayıttan sonra yenilenir.
+// not: `export const revalidate = 3600` DENENDİ ve kaldırıldı — Next 16.3'te
+// zaman bazlı tazeleme + kayıt sonrası tazeleme + menü önyüklemesi bir araya
+// gelince bu sayfanın önyükleme istekleri hiç yanıtlanmıyordu (E2E testinde
+// yakalandı). Bedeli: "bu ay" rakamları ay dönümünde ilk kayda kadar eski ayı gösterir.
+
 const monthName = new Intl.DateTimeFormat("tr-TR", {
   month: "long",
   year: "numeric",

@@ -93,156 +93,66 @@ export function ProductList({
           </p>
         ) : (
           <>
-            {/* Masaüstü: tam tablo. Mobilde yatay taşmayı önlemek için gizlenir. */}
-            <table className="hidden w-full text-sm sm:table">
-              <thead>
-                <tr className="border-b border-line text-left text-[11px] uppercase tracking-wider text-muted">
-                  <th className="px-5 py-3 font-medium">Ürün</th>
-                  <th className="px-5 py-3 font-medium">Birimler</th>
-                  <th className="px-5 py-3 text-right font-medium">Birim fiyatı</th>
-                  <th className="px-5 py-3 text-right font-medium">Toptancı</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {filtered.map((p) => (
-                  <tr
-                    key={p.id}
+            {/* Tek liste, iki düzen. Eskiden tablo + mobil liste İKİSİ BİRDEN
+                render edilip biri CSS ile gizleniyordu (110 üründe ~3100 DOM
+                düğümü). Şimdi tek satır: telefonda ad üstte, birimler altta;
+                geniş ekranda ad | birim + fiyat | toptancı sayısı sütunları. */}
+            <div className="hidden grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)_5rem] gap-6 border-b border-line px-5 py-3 text-[11px] font-medium uppercase tracking-wider text-muted sm:grid">
+              <span>Ürün</span>
+              <span className="flex justify-between">
+                <span>Birimler</span>
+                <span>Birim fiyatı</span>
+              </span>
+              <span className="text-right">Toptancı</span>
+            </div>
+            <ul className="divide-y divide-line text-sm">
+              {filtered.map((p) => (
+                <li key={p.id} className="cv-row">
+                  <button
+                    type="button"
                     onClick={() => setOpenId(p.id)}
-                    className="group cursor-pointer transition-colors hover:bg-surface-2"
+                    className="group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-3.5 text-left transition-colors hover:bg-surface-2 active:bg-surface-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)_5rem] sm:gap-x-6 sm:px-5"
                   >
-                    <td className="px-5 py-3.5">
+                    <span className="min-w-0">
                       <span className="font-medium text-ink transition-colors group-hover:text-ember">
                         {p.name}
                       </span>
                       {p.defaultSupplierName && (
-                        <span className="ml-2 text-xs text-muted">
-                          · {p.defaultSupplierName}
+                        <span className="mt-0.5 block truncate text-xs text-muted">
+                          {p.defaultSupplierName}
+                          {p.suppliers.length > 1 && (
+                            <span className="sm:hidden"> · {p.suppliers.length} toptancı</span>
+                          )}
                         </span>
                       )}
-                    </td>
-                    <td className="px-5 py-3.5 align-top">
-                      {p.units.length === 0 ? (
-                        <span className="text-muted">—</span>
-                      ) : (
-                        <div className="flex flex-col items-start gap-1">
-                          {p.units.map((u) => {
-                            // Koli/Kasa gibi paket birimlerde içindeki adet listede
-                            // doğrudan görünsün (1 ise muhtemelen girilmemiş → fark edilsin).
-                            const showQty = isPackagingUnit(u.name);
-                            return (
-                              <span
-                                key={u.packageId}
-                                className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] text-ink-soft"
-                              >
-                                {u.name}
-                                {showQty && (
-                                  <span className="ml-1 text-muted">
-                                    · {u.quantityInBase}{" "}
-                                    {p.baseUnit.toLocaleLowerCase("tr")}
-                                  </span>
-                                )}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </td>
-                    {/* Fiyatlar Birimler sütunuyla satır satır hizalı; birim adı
-                        tekrar edilmez, yalnızca tutar gösterilir. */}
-                    <td className="px-5 py-3.5 text-right align-top">
-                      {p.units.length === 0 ? (
-                        <span className="text-muted">—</span>
-                      ) : (
-                        <div className="flex flex-col items-end gap-1">
-                          {p.units.map((u) => {
-                            // Paket fiyatı (1 Koli/Paket alış fiyatı) + paket birden çok
-                            // baz birim içeriyorsa adet başı fiyat (paket / içindeki adet).
-                            const perBase =
-                              u.lastUnitPrice != null && u.quantityInBase > 1
-                                ? Math.round(u.lastUnitPrice / u.quantityInBase)
-                                : null;
-                            return (
-                              <span
-                                key={u.packageId}
-                                className="flex flex-col items-end border border-transparent py-0.5 leading-tight"
-                              >
-                                <span className="nums text-[11px] font-medium text-ink">
-                                  {u.lastUnitPrice != null ? (
-                                    formatKurus(u.lastUnitPrice)
-                                  ) : (
-                                    <span className="font-normal text-muted">—</span>
-                                  )}
-                                </span>
-                                {perBase != null && (
-                                  <span className="nums text-[10px] text-muted">
-                                    {formatKurus(perBase)}/
-                                    {p.baseUnit.toLocaleLowerCase("tr")}
-                                  </span>
-                                )}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </td>
-                    <td className="nums px-5 py-3.5 text-right text-ink-soft">
-                      {p.suppliers.length || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span>
 
-            {/* Mobil: her ürün dikey bir kart. Tablo yerine yığılmış düzen. */}
-            <ul className="divide-y divide-line sm:hidden">
-              {filtered.map((p) => (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onClick={() => setOpenId(p.id)}
-                    className="flex w-full flex-col gap-2 px-4 py-3.5 text-left transition-colors active:bg-surface-2"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <span className="font-medium text-ink">{p.name}</span>
-                        {p.defaultSupplierName && (
-                          <span className="mt-0.5 block truncate text-xs text-muted">
-                            {p.defaultSupplierName}
-                            {p.suppliers.length > 1 && (
-                              <span> · {p.suppliers.length} toptancı</span>
-                            )}
-                          </span>
-                        )}
-                      </div>
-                      <span className="mt-0.5 shrink-0 text-muted" aria-hidden>
-                        ›
-                      </span>
-                    </div>
-
-                    {p.units.length > 0 && (
-                      <div className="flex flex-col gap-1.5">
-                        {p.units.map((u) => {
+                    {/* Birim satırları: rozet solda, fiyat sağda — her zaman hizalı. */}
+                    <span className="col-span-2 row-start-2 flex flex-col gap-1.5 sm:col-span-1 sm:row-start-auto sm:gap-1">
+                      {p.units.length === 0 ? (
+                        <span className="hidden text-muted sm:inline">—</span>
+                      ) : (
+                        p.units.map((u) => {
+                          // Koli/Kasa gibi paket birimlerde içindeki adet görünsün
+                          // (1 ise muhtemelen girilmemiş → fark edilsin).
                           const showQty = isPackagingUnit(u.name);
+                          // Paket birden çok baz birim içeriyorsa adet başı fiyat.
                           const perBase =
                             u.lastUnitPrice != null && u.quantityInBase > 1
                               ? Math.round(u.lastUnitPrice / u.quantityInBase)
                               : null;
                           return (
-                            <div
-                              key={u.packageId}
-                              className="flex items-center justify-between gap-3"
-                            >
+                            <span key={u.packageId} className="flex items-center justify-between gap-3">
                               <span className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] text-ink-soft">
                                 {u.name}
                                 {showQty && (
                                   <span className="ml-1 text-muted">
-                                    · {u.quantityInBase}{" "}
-                                    {p.baseUnit.toLocaleLowerCase("tr")}
+                                    · {u.quantityInBase} {p.baseUnit.toLocaleLowerCase("tr")}
                                   </span>
                                 )}
                               </span>
                               <span className="flex shrink-0 flex-col items-end leading-tight">
-                                <span className="nums text-xs font-medium text-ink">
+                                <span className="nums text-xs font-medium text-ink sm:text-[11px]">
                                   {u.lastUnitPrice != null ? (
                                     formatKurus(u.lastUnitPrice)
                                   ) : (
@@ -251,16 +161,22 @@ export function ProductList({
                                 </span>
                                 {perBase != null && (
                                   <span className="nums text-[10px] text-muted">
-                                    {formatKurus(perBase)}/
-                                    {p.baseUnit.toLocaleLowerCase("tr")}
+                                    {formatKurus(perBase)}/{p.baseUnit.toLocaleLowerCase("tr")}
                                   </span>
                                 )}
                               </span>
-                            </div>
+                            </span>
                           );
-                        })}
-                      </div>
-                    )}
+                        })
+                      )}
+                    </span>
+
+                    <span className="col-start-2 row-start-1 flex items-start justify-end gap-2 text-ink-soft sm:col-start-auto sm:row-start-auto">
+                      <span className="nums hidden sm:inline">{p.suppliers.length || "—"}</span>
+                      <span className="text-muted sm:hidden" aria-hidden>
+                        ›
+                      </span>
+                    </span>
                   </button>
                 </li>
               ))}

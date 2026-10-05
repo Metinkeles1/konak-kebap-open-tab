@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { tlToKurus } from "@/lib/money";
 import { getPurchaseReconciliation, getBalanceReconciliation } from "@/lib/reconciliation";
@@ -66,7 +67,7 @@ export async function deleteSupplier(fd: FormData) {
 
 // --- Ödeme ---
 
-export async function createPayment(fd: FormData) {
+async function createPaymentImpl(fd: FormData) {
   const data = paymentCreateSchema.parse({
     supplierId: str(fd, "supplierId"),
     amount: tlToKurus(str(fd, "amount") ?? "0"),
@@ -110,7 +111,7 @@ function baseUnitFromLabel(label?: string): "ADET" | "LITRE" | "KG" | "ML" | "GR
 const eq = (a: string, b: string) =>
   a.toLocaleLowerCase("tr") === b.toLocaleLowerCase("tr");
 
-export async function createProduct(fd: FormData) {
+async function createProductImpl(fd: FormData) {
   const unit = str(fd, "unit"); // alış birimi etiketi (Koli, Kg, Balya…)
   const supplierId = str(fd, "supplierId");
   const data = productCreateSchema.parse({
@@ -254,7 +255,7 @@ export async function deletePackage(fd: FormData) {
 }
 
 // Yanlış girilen ürün adını düzelt. Aynı isimli başka bir aktif ürün varsa engelle.
-export async function renameProduct(fd: FormData) {
+async function renameProductImpl(fd: FormData) {
   const productId = str(fd, "productId");
   const name = str(fd, "name");
   if (!productId || !name) return;
@@ -466,7 +467,7 @@ const UNIT_TO_BASE: Record<string, "ADET" | "LITRE" | "KG" | "ML" | "GR" | "PAKE
   Kasa: "ADET", // Kasa baz birim olarak ADET; etiket paket adında "Kasa" olarak durur
 };
 
-export async function createPurchase(input: {
+async function createPurchaseImpl(input: {
   supplierId: string;
   note?: string;
   date?: string; // ISO (datetime); boşsa şimdi
@@ -647,7 +648,7 @@ export type EditPurchaseItem = {
   unitPriceTl: string; // boşsa: mevcut kalemin fiyatı, o da yoksa birimin son fiyatı
 };
 
-export async function updatePurchase(input: {
+async function updatePurchaseImpl(input: {
   id: string;
   supplierId: string;
   date?: string;
@@ -771,4 +772,69 @@ export async function loadPurchaseReconciliation(purchaseId: string) {
 
 export async function loadBalanceReconciliation(supplierId: string) {
   return getBalanceReconciliation(supplierId);
+}
+
+// --- Kullanıcıya hata gösteren işlemler -------------------------------------
+// Beklenen hatalar (doğrulama, kopya ürün, eksik fiyat…) FIRLATILMAZ, değer olarak
+// döner. Next production'da server action'dan fırlatılan hatanın metnini gizler
+// (istemci "Minified React error #441" görür); Türkçe uyarılar canlıda hiç
+// görünmüyordu. İstemci `res.ok`'a bakar.
+export type ActionResult<T = null> = { ok: true; data: T } | { ok: false; error: string };
+
+function userMessage(e: unknown): string {
+  if (e instanceof ZodError) {
+    return `Geçersiz veri: ${e.issues[0]?.message ?? "alanları kontrol edin"}`;
+  }
+  // Prisma / bağlantı hataları teknik ayrıntı içerir — kullanıcıya genel mesaj,
+  // ayrıntı sunucu loguna. Kendi fırlattığımız (Türkçe) hatalar olduğu gibi gösterilir.
+  const technical =
+    !(e instanceof Error) ||
+    /prisma|P\d{4}|ECONN|ETIMEDOUT|connect|database/i.test(`${e.name} ${e.message}`);
+  if (!technical) return (e as Error).message;
+  console.error(e);
+  return "İşlem kaydedilemedi. Bağlantıyı kontrol edip tekrar deneyin.";
+}
+
+async function attempt<T>(fn: () => Promise<T>): Promise<ActionResult<T>> {
+  try {
+    return { ok: true, data: await fn() };
+  } catch (e) {
+    return { ok: false, error: userMessage(e) };
+  }
+}
+
+export async function createPayment(fd: FormData): Promise<ActionResult> {
+  return attempt(async () => {
+    await createPaymentImpl(fd);
+    return null;
+  });
+}
+
+export async function createProduct(fd: FormData): Promise<ActionResult> {
+  return attempt(async () => {
+    await createProductImpl(fd);
+    return null;
+  });
+}
+
+export async function renameProduct(fd: FormData): Promise<ActionResult> {
+  return attempt(async () => {
+    await renameProductImpl(fd);
+    return null;
+  });
+}
+
+export async function createPurchase(
+  input: Parameters<typeof createPurchaseImpl>[0],
+): Promise<ActionResult<{ id: string }>> {
+  return attempt(() => createPurchaseImpl(input));
+}
+
+export async function updatePurchase(
+  input: Parameters<typeof updatePurchaseImpl>[0],
+): Promise<ActionResult> {
+  return attempt(async () => {
+    await updatePurchaseImpl(input);
+    return null;
+  });
 }

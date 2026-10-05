@@ -36,14 +36,20 @@ export function SubmitButton({
   );
 }
 
-/* Küçük tehlikeli "sil" butonu (formun içinde) */
-export function DeleteButton({ label = "Sil" }: { label?: string }) {
+/* Küçük tehlikeli "sil" butonu (formun içinde).
+   `confirm` verilirse göndermeden önce onay sorulur — telefonda kaydırırken
+   yanlışlıkla dokunup bir alışı/ödemeyi silmek çok kolaydı. Dokunma alanı
+   mobilde büyük (≈36px), geniş ekranda kompakt. */
+export function DeleteButton({ label = "Sil", confirm }: { label?: string; confirm?: string }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
       disabled={pending}
-      className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-debt-soft hover:text-debt disabled:opacity-50"
+      onClick={(e) => {
+        if (confirm && !window.confirm(confirm)) e.preventDefault();
+      }}
+      className="rounded-md px-2.5 py-2 text-xs font-medium text-muted transition-colors hover:bg-debt-soft hover:text-debt active:bg-debt-soft disabled:opacity-50 sm:px-2 sm:py-1"
       title={label}
     >
       {pending ? "…" : label}

@@ -2,9 +2,11 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { formatKurus } from "@/lib/money";
 
-/* Form alanları için ortak stil */
+/* Form alanları için ortak stil.
+   Mobilde 16px (text-base): iOS Safari 16px'ten küçük yazılı bir alana odaklanınca
+   sayfayı zorla yakınlaştırıyor ve geri uzaklaştırmıyordu. Geniş ekranda 14px. */
 export const inputClass =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
+  "w-full rounded-lg border border-line bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
 
 /* Sayfa başlığı + opsiyonel aksiyon */
 export function PageHeader({
@@ -35,12 +37,13 @@ export function Card({
   action,
   children,
   className = "",
-  bodyClassName = "",
+  bodyClassName,
 }: {
   title?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Gövde sınıfı; verilmezse "p-5". "" = dolgusuz (içerik kendi dolgusunu taşır). */
   bodyClassName?: string;
 }) {
   return (
@@ -55,7 +58,9 @@ export function Card({
           {action}
         </header>
       )}
-      <div className={bodyClassName || "p-5"}>{children}</div>
+      {/* `??`: boş metin "dolgusuz" demektir. Eskiden `||` kullanılıyordu ve ""
+          yine p-5'e düşüyordu — tablolar/listeler her yandan 20px kayıp veriyordu. */}
+      <div className={bodyClassName ?? "p-5"}>{children}</div>
     </section>
   );
 }
@@ -90,17 +95,23 @@ export function Stat({
         : tone === "ember"
           ? "bg-ember/70"
           : "";
+  // Değer kartın genişliğine sığacak şekilde küçülür (en çok 30px). Telefonda iki
+  // sütunlu ızgarada "₺212.369,00" 30px'te kartın dışına taşıp kesiliyordu —
+  // uygulamanın en önemli rakamı (toplam borç) okunmuyordu. 100cqi = kartın iç
+  // genişliği; karakter başına ~0,64em (serif rakam + ₺) ile bölünür.
+  const fitSize = `min(30px, calc(100cqi / ${(Math.max(value.length, 4) * 0.64).toFixed(2)}))`;
   return (
-    <div className="relative overflow-hidden rounded-card border border-line bg-surface p-5 shadow-card hover-lift">
+    <div className="@container relative overflow-hidden rounded-card border border-line bg-surface p-4 shadow-card hover-lift sm:p-5">
       {accent && <span className={`absolute inset-x-0 top-0 h-0.5 ${accent}`} />}
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
+        <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted sm:text-[11px] sm:tracking-[0.14em]">
           {label}
         </p>
         {icon && <span className="text-muted">{icon}</span>}
       </div>
       <p
-        className={`nums mt-3 font-display text-[30px] font-semibold leading-none ${valueColor}`}
+        className={`nums mt-2.5 whitespace-nowrap font-display font-semibold leading-none sm:mt-3 ${valueColor}`}
+        style={{ fontSize: fitSize }}
       >
         {value}
       </p>

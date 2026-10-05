@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { ok, created, handleError } from "@/lib/api";
+import { ok, changed, handleError } from "@/lib/api";
 import { productCreateSchema } from "@/lib/validations";
 
 // GET /api/products — tüm (silinmemiş) ürünler + birimleri
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       },
       include: { packages: true },
     });
-    return created(product);
+    return changed(product, 201);
   } catch (err) {
     return handleError(err);
   }

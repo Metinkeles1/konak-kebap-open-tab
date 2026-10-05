@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { PageHeader, Card } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
+import { MobileCollapsible } from "@/components/mobile-collapsible";
 import { NewProductForm } from "./new-product-form";
 import { ProductList, type ProductDetail } from "./product-list";
 
@@ -95,9 +96,9 @@ export default async function ProductsPage() {
     <>
       <PageHeader title="Ürünler" subtitle={`${products.length} ürün`} />
 
-      <Card title="Yeni ürün" className="mb-6">
+      <MobileCollapsible title="Yeni ürün" className="mb-6" defaultOpen={products.length === 0}>
         <NewProductForm suppliers={suppliers} />
-      </Card>
+      </MobileCollapsible>
 
       <ProductList products={details} allSuppliers={suppliers} />
     </>

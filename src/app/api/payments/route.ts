@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { ok, created, fail, handleError } from "@/lib/api";
+import { ok, changed, fail, handleError } from "@/lib/api";
 import { paymentCreateSchema } from "@/lib/validations";
 
 // GET /api/payments — (silinmemiş) ödemeler. ?supplierId=... ile filtrelenebilir.
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     if (!supplier) return fail("Toptancı bulunamadı", 404);
 
     const payment = await prisma.payment.create({ data });
-    return created(payment);
+    return changed(payment, 201);
   } catch (err) {
     return handleError(err);
   }

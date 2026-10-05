@@ -202,7 +202,7 @@ export function BalanceReconButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-ink shadow-card transition-colors hover:bg-surface-2"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-medium text-ink shadow-card transition-colors hover:bg-surface-2 active:bg-surface-2 sm:py-2"
       >
         Mutabakat gönder
       </button>

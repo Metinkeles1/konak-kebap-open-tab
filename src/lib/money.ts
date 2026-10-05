@@ -24,10 +24,15 @@ export function kurusToInput(kurus: number): string {
   return kurusToTl(kurus).toString().replace(".", ",");
 }
 
+// Biçimlendirici bir kez kurulur: Intl.NumberFormat oluşturmak pahalıdır ve
+// formatKurus uzun listelerde (sayım modu, fiyat takibi) her render'da yüzlerce
+// kez çağrılır. Her çağrıda yeni nesne kurmak telefonda yazmayı geciktiriyordu.
+const tryFormatter = new Intl.NumberFormat("tr-TR", {
+  style: "currency",
+  currency: "TRY",
+});
+
 /** kuruş -> "12,50 ₺" gibi Türkçe biçim */
 export function formatKurus(kurus: number): string {
-  return new Intl.NumberFormat("tr-TR", {
-    style: "currency",
-    currency: "TRY",
-  }).format(kurusToTl(kurus));
+  return tryFormatter.format(kurusToTl(kurus));
 }

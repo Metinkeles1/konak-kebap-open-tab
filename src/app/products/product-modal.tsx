@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import { formatKurus } from "@/lib/money";
 import { formatDate } from "@/lib/format";
@@ -15,6 +15,7 @@ import {
 } from "@/app/actions";
 import { Badge, inputClass } from "@/components/ui";
 import { SubmitButton, DeleteButton } from "@/components/form";
+import { Modal } from "@/components/modal";
 import type { ProductDetail } from "./product-list";
 
 type Cell = { price: number; prevPrice: number | null; date: string; source: string };
@@ -110,7 +111,7 @@ function SupplierPriceRow({
         inputMode="decimal"
         defaultValue={kurusToInput(cell.price)}
         aria-label={`${supplier.name} fiyatı (TL)`}
-        className={`nums w-24 rounded-md border border-line bg-surface px-2 py-1 text-right font-semibold outline-none focus:border-ember focus:ring-2 focus:ring-ember/15 ${
+        className={`nums w-20 rounded-md border border-line bg-surface px-2 py-1 text-right font-semibold sm:w-24 outline-none focus:border-ember focus:ring-2 focus:ring-ember/15 ${
           isCheapest ? "text-credit" : "text-ink"
         }`}
       />
@@ -361,20 +362,7 @@ export function ProductModal({
   allSuppliers: { id: string; name: string }[];
   onClose: () => void;
 }) {
-  // Esc ile kapat + arka plan kaymasını kilitle
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [onClose]);
-
+  // Kabuk (Esc, karartma, mobilde alttan açılma) ortak Modal'dan gelir.
   const { suppliers, units } = product;
 
   // Ürün adı düzenleme — çakışma (aynı isim) hatasını modal içinde göster.
@@ -382,7 +370,8 @@ export function ProductModal({
   const [renameState, renameAction] = useActionState(
     async (_prev: { error: string | null }, fd: FormData) => {
       try {
-        await renameProduct(fd);
+        const res = await renameProduct(fd);
+        if (!res.ok) return { error: res.error };
         setEditingName(false);
         return { error: null };
       } catch (e) {
@@ -407,185 +396,168 @@ export function ProductModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-ink/55 p-4 sm:p-8"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={`${product.name} detayı`}
-    >
-      <div
-        className="my-auto w-full max-w-2xl rounded-card border border-line bg-paper shadow-pop"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Başlık */}
-        <header className="flex items-start justify-between gap-4 border-b border-line px-6 py-4">
-          <div className="min-w-0 flex-1">
-            {editingName ? (
-              <form action={renameAction} className="flex flex-wrap items-center gap-1.5">
-                <input type="hidden" name="productId" value={product.id} />
-                <input
-                  name="name"
-                  required
-                  defaultValue={product.name}
-                  autoFocus
-                  aria-label="Ürün adı"
-                  className={`${inputClass} flex-1 text-lg font-semibold`}
-                />
-                <SubmitButton variant="ghost" className="px-3! py-1.5! text-xs!">
-                  Kaydet
-                </SubmitButton>
-                <button
-                  type="button"
-                  onClick={() => setEditingName(false)}
-                  className="rounded-md px-2 py-1 text-xs text-muted transition-colors hover:text-ink"
-                  aria-label="Vazgeç"
-                >
-                  ✕
-                </button>
-              </form>
-            ) : (
-              <div className="flex items-center gap-2">
-                <h2 className="font-display text-xl font-semibold tracking-tight text-ink">
-                  {product.name}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setEditingName(true)}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-                  title="Ürün adını düzenle"
-                >
-                  Düzenle
-                </button>
-              </div>
-            )}
-            {renameState.error && (
-              <p className="mt-1.5 text-xs text-debt">{renameState.error}</p>
-            )}
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <Badge tone="neutral">{product.baseUnit}</Badge>
-              <span className="text-xs text-muted">
-                {units.length} birim · {suppliers.length} toptancı
-              </span>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Kapat"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-          >
-            ✕
-          </button>
-        </header>
-
-        <div className="space-y-5 p-6">
-          {/* En ucuz birim başı seçenek — birim/toptancı farkı gözetmeden */}
-          {best && (
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg border border-credit/20 bg-credit-soft/60 px-4 py-2.5 text-sm">
-              <span className="font-medium text-credit">En ucuz birim başı</span>
-              <span className="nums text-base font-semibold text-credit">
-                {formatKurus(Math.round(best.perBase))}/{product.baseUnit}
-              </span>
-              <span className="text-muted">
-                · {best.supplierName} · {best.unitName}
-              </span>
-            </div>
-          )}
-
-          {/* Varsayılan toptancı: yeni alışta otomatik dolan fiyatın sahibi */}
-          <form
-            action={setDefaultSupplier}
-            className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm shadow-card"
-          >
-            <input type="hidden" name="productId" value={product.id} />
-            <label htmlFor="defaultSupplier" className="text-xs font-medium text-muted">
-              Varsayılan toptancı
-            </label>
-            <select
-              id="defaultSupplier"
-              name="supplierId"
-              defaultValue={suppliers.find((s) => s.isDefault)?.id ?? ""}
-              disabled={suppliers.length === 0}
-              className={`${inputClass} w-48`}
-            >
-              <option value="">— Yok —</option>
-              {/* Yalnızca bu ürünün fiyatı olan toptancılar varsayılan olabilir */}
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <SubmitButton variant="ghost" className="px-3! py-1.5! text-xs!">
-              Kaydet
-            </SubmitButton>
-            <span className="text-[11px] text-muted">
-              ★ ile işaretlenir · alış formunda fiyatı öne çıkar
-            </span>
-          </form>
-
-          {/* Birimler — her birim bir kart, içinde toptancılar fiyata göre sıralı */}
-          {units.length === 0 ? (
-            <p className="rounded-card border border-dashed border-line px-5 py-8 text-center text-sm text-muted">
-              Henüz birim yok. Aşağıdan bir alış birimi (Koli, Adet…) ekleyin.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {units.map((u) => (
-                <UnitCard
-                  key={u.packageId}
-                  unit={u}
-                  baseUnit={product.baseUnit}
-                  suppliers={suppliers}
-                  allSuppliers={allSuppliers}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Yeni alış birimi ekle */}
-          <form
-            action={addPackage}
-            className="grid grid-cols-1 gap-2 rounded-lg bg-surface p-3 shadow-card sm:grid-cols-[2fr_1fr_auto]"
-          >
+    <Modal
+      onClose={onClose}
+      label={`${product.name} detayı`}
+      title={
+        editingName ? (
+          <form action={renameAction} className="flex flex-wrap items-center gap-1.5">
             <input type="hidden" name="productId" value={product.id} />
             <input
               name="name"
               required
-              placeholder="Yeni birim (Koli, Adet…) *"
-              className={inputClass}
+              defaultValue={product.name}
+              autoFocus
+              aria-label="Ürün adı"
+              className={`${inputClass} flex-1 text-lg! font-semibold`}
             />
-            <input
-              name="quantityInBase"
-              type="number"
-              min="1"
-              defaultValue="1"
-              title={`Kaç ${product.baseUnit}'e denk`}
-              aria-label={`Kaç ${product.baseUnit}`}
-              className={inputClass}
-            />
-            <SubmitButton variant="ghost">+ Birim</SubmitButton>
-          </form>
-
-          {/* Tehlikeli: ürünü sil */}
-          <div className="flex justify-end border-t border-line pt-4">
-            <form
-              action={deleteProduct}
-              onSubmit={(e) => {
-                if (
-                  !confirm(
-                    `"${product.name}" ürününü tüm birimleriyle silmek istediğinize emin misiniz?`,
-                  )
-                )
-                  e.preventDefault();
-              }}
+            <SubmitButton variant="ghost" className="px-3! py-1.5! text-xs!">
+              Kaydet
+            </SubmitButton>
+            <button
+              type="button"
+              onClick={() => setEditingName(false)}
+              className="rounded-md px-2 py-1 text-xs text-muted transition-colors hover:text-ink"
+              aria-label="Vazgeç"
             >
-              <input type="hidden" name="id" value={product.id} />
-              <DeleteButton label="Ürünü sil" />
-            </form>
+              ✕
+            </button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-2">
+            <h2 className="font-display text-xl font-semibold tracking-tight text-ink">
+              {product.name}
+            </h2>
+            <button
+              type="button"
+              onClick={() => setEditingName(true)}
+              className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              title="Ürün adını düzenle"
+            >
+              Düzenle
+            </button>
           </div>
+        )
+      }
+      subtitle={
+        <>
+          {renameState.error && <p className="mb-1.5 text-xs text-debt">{renameState.error}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="neutral">{product.baseUnit}</Badge>
+            <span>
+              {units.length} birim · {suppliers.length} toptancı
+            </span>
+          </div>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        {/* En ucuz birim başı seçenek — birim/toptancı farkı gözetmeden */}
+        {best && (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg border border-credit/20 bg-credit-soft/60 px-4 py-2.5 text-sm">
+            <span className="font-medium text-credit">En ucuz birim başı</span>
+            <span className="nums text-base font-semibold text-credit">
+              {formatKurus(Math.round(best.perBase))}/{product.baseUnit}
+            </span>
+            <span className="text-muted">
+              · {best.supplierName} · {best.unitName}
+            </span>
+          </div>
+        )}
+
+        {/* Varsayılan toptancı: yeni alışta otomatik dolan fiyatın sahibi */}
+        <form
+          action={setDefaultSupplier}
+          className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm shadow-card"
+        >
+          <input type="hidden" name="productId" value={product.id} />
+          <label htmlFor="defaultSupplier" className="text-xs font-medium text-muted">
+            Varsayılan toptancı
+          </label>
+          <select
+            id="defaultSupplier"
+            name="supplierId"
+            defaultValue={suppliers.find((s) => s.isDefault)?.id ?? ""}
+            disabled={suppliers.length === 0}
+            className={`${inputClass} w-48`}
+          >
+            <option value="">— Yok —</option>
+            {/* Yalnızca bu ürünün fiyatı olan toptancılar varsayılan olabilir */}
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <SubmitButton variant="ghost" className="px-3! py-1.5! text-xs!">
+            Kaydet
+          </SubmitButton>
+          <span className="text-[11px] text-muted">
+            ★ ile işaretlenir · alış formunda fiyatı öne çıkar
+          </span>
+        </form>
+
+        {/* Birimler — her birim bir kart, içinde toptancılar fiyata göre sıralı */}
+        {units.length === 0 ? (
+          <p className="rounded-card border border-dashed border-line px-5 py-8 text-center text-sm text-muted">
+            Henüz birim yok. Aşağıdan bir alış birimi (Koli, Adet…) ekleyin.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {units.map((u) => (
+              <UnitCard
+                key={u.packageId}
+                unit={u}
+                baseUnit={product.baseUnit}
+                suppliers={suppliers}
+                allSuppliers={allSuppliers}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Yeni alış birimi ekle */}
+        <form
+          action={addPackage}
+          className="grid grid-cols-1 gap-2 rounded-lg bg-surface p-3 shadow-card sm:grid-cols-[2fr_1fr_auto]"
+        >
+          <input type="hidden" name="productId" value={product.id} />
+          <input
+            name="name"
+            required
+            placeholder="Yeni birim (Koli, Adet…) *"
+            className={inputClass}
+          />
+          <input
+            name="quantityInBase"
+            type="number"
+            min="1"
+            defaultValue="1"
+            title={`Kaç ${product.baseUnit}'e denk`}
+            aria-label={`Kaç ${product.baseUnit}`}
+            className={inputClass}
+          />
+          <SubmitButton variant="ghost">+ Birim</SubmitButton>
+        </form>
+
+        {/* Tehlikeli: ürünü sil */}
+        <div className="flex justify-end border-t border-line pt-4">
+          <form
+            action={deleteProduct}
+            onSubmit={(e) => {
+              if (
+                !confirm(
+                  `"${product.name}" ürününü tüm birimleriyle silmek istediğinize emin misiniz?`,
+                )
+              )
+                e.preventDefault();
+            }}
+          >
+            <input type="hidden" name="id" value={product.id} />
+            <DeleteButton label="Ürünü sil" />
+          </form>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

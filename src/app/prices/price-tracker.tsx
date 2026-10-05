@@ -63,7 +63,7 @@ function Segmented<T extends string>({
           key={o.id}
           type="button"
           onClick={() => onChange(o.id)}
-          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+          className={`rounded-md px-3 py-2 text-xs font-medium transition-colors sm:py-1.5 ${
             value === o.id
               ? "bg-surface text-ink shadow-sm ring-1 ring-line"
               : "text-muted hover:text-ink"
@@ -405,7 +405,7 @@ function PriceRow({
 }) {
   const { line } = s;
   return (
-    <li>
+    <li className="cv-row">
       <button
         type="button"
         onClick={onToggle}

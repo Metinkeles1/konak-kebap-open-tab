@@ -21,7 +21,7 @@ export function PageHeaderSkeleton({ action = true }: { action?: boolean }) {
 /* KPI istatistik kartı iskeleti */
 export function StatSkeleton() {
   return (
-    <div className="rounded-card border border-line bg-surface p-5 shadow-card">
+    <div className="rounded-card border border-line bg-surface p-4 shadow-card sm:p-5">
       <Skeleton className="h-3 w-20" />
       <Skeleton className="mt-4 h-7 w-28" />
       <Skeleton className="mt-2.5 h-3 w-16" />

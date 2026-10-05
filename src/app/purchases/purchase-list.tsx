@@ -83,7 +83,7 @@ export function PurchaseList({
       ) : (
         <ul className="divide-y divide-line">
           {filtered.map((p) => (
-            <li key={p.id}>
+            <li key={p.id} className="cv-row">
               {/* Satıra tıklayınca detay modal'da açılır */}
               <button
                 type="button"
