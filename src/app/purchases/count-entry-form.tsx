@@ -13,6 +13,8 @@ import { formatKurus, tlToKurus } from "@/lib/money";
 import { isPackagingUnit } from "@/lib/units";
 import { buildOrderText, fmtQty, WhatsAppButton } from "@/components/whatsapp";
 import { ReconciliationDialog } from "@/components/reconciliation";
+import { lineVat, vatBreakdown } from "@/lib/vat";
+import { VatSelect, VatSummary } from "@/components/vat";
 
 export type CountPackage = {
   packageId: string;
@@ -21,13 +23,15 @@ export type CountPackage = {
   unit: string;
   baseCount: number;
   lastPrice: number | null;
+  vatRate: number; // ürünün kayıtlı KDV oranı (%)
   freq: boolean;
 };
 type SupplierOpt = { id: string; name: string; phone: string | null };
 type Catalog = Record<string, CountPackage[]>;
 
-type RowState = { qty: string; price: string }; // price boş = son fiyatı kullan
-type NewRow = { name: string; unit: string; baseCount: string; qty: string; price: string };
+// price boş = son fiyatı kullan; vat yoksa ürünün kayıtlı oranı (değiştirilirse ürüne de yazılır)
+type RowState = { qty: string; price: string; vat?: number };
+type NewRow = { name: string; unit: string; baseCount: string; qty: string; price: string; vat: number };
 
 const UNIT_SUGGESTIONS = ["Adet", "Koli", "Kasa", "Paket", "Balya", "Kg", "Gram", "Litre", "ML", "Çuval", "Teneke", "Rulo"];
 
@@ -47,9 +51,12 @@ function nowLocal() {
   const d = new Date();
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
-const newNewRow = (): NewRow => ({ name: "", unit: "", baseCount: "", qty: "1", price: "" });
+const newNewRow = (): NewRow => ({ name: "", unit: "", baseCount: "", qty: "1", price: "", vat: 0 });
 
 const EMPTY_ROW: RowState = { qty: "", price: "" };
+
+// Sayım satırı ızgarası (geniş ekran): ürün | fiyat | KDV | adet | tutar
+const COUNT_COLS = "sm:grid-cols-[minmax(0,1fr)_120px_92px_76px_104px]";
 
 // Satırın geçerli birim fiyatı (kuruş): yazılan fiyat, yoksa/okunamazsa son fiyat.
 function priceKurus(r: RowState | undefined, p: CountPackage): number | null {
@@ -58,6 +65,9 @@ function priceKurus(r: RowState | undefined, p: CountPackage): number | null {
   }
   return p.lastPrice;
 }
+
+// Satırın KDV oranı: satırda seçilen, yoksa ürünün kayıtlı oranı.
+const rowVat = (r: RowState | undefined, p: CountPackage) => r?.vat ?? p.vatRate;
 
 // Yazılan fiyat son fiyattan %10+ farklıysa — irsaliyeyi yanlış okumuş olabilir.
 function isOutlier(r: RowState | undefined, p: CountPackage): boolean {
@@ -96,10 +106,11 @@ const CountRow = memo(function CountRow({
   const on = qty > 0;
   const line = Math.round((priceKurus(r, p) ?? 0) * qty);
   const outlier = isOutlier(r, p);
+  const vat = rowVat(r, p);
   const pricePlaceholder = p.lastPrice != null ? formatKurus(p.lastPrice).replace("₺", "").trim() : "fiyat";
   return (
     <div
-      className={`cv-row grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-2 rounded-lg border px-2.5 py-2 transition sm:grid-cols-[minmax(0,1fr)_120px_76px_104px] sm:px-3 ${
+      className={`cv-row grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-2 rounded-lg border px-2.5 py-2 transition ${COUNT_COLS} sm:px-3 ${
         on ? "border-ember/40 bg-ember-soft/50" : "border-transparent hover:bg-surface-2"
       }`}
     >
@@ -108,11 +119,14 @@ const CountRow = memo(function CountRow({
           <span className="truncate text-sm font-medium text-ink">{p.productName}</span>
           <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{p.unit}</span>
         </div>
-        <p className="mt-0.5 truncate text-[11px] text-muted">{fmtBase(p)}</p>
+        <p className="mt-0.5 truncate text-[11px] text-muted">
+          {fmtBase(p)}
+          {vat > 0 && <span className="nums"> · KDV %{vat}</span>}
+        </p>
 
         {/* Mobil: satır aktifken kompakt fiyat + tutar (masaüstünde ayrı sütunlar) */}
         {on && (
-          <div className="mt-1.5 flex items-center gap-1.5 sm:hidden">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 sm:hidden">
             <input
               inputMode="decimal"
               value={r.price}
@@ -128,6 +142,7 @@ const CountRow = memo(function CountRow({
             {outlier && (
               <span title="Son fiyattan %10+ farklı" className="text-[11px] font-bold text-debt">?</span>
             )}
+            <VatSelect size="sm" value={vat} onChange={(v) => onPatch(p.packageId, { vat: v })} />
           </div>
         )}
       </div>
@@ -149,6 +164,15 @@ const CountRow = memo(function CountRow({
           >
             ?
           </span>
+        )}
+      </div>
+
+      {/* KDV — masaüstü sütunu; yalnızca adet girilen satırda seçilebilir */}
+      <div className="hidden sm:block">
+        {on ? (
+          <VatSelect size="sm" value={vat} onChange={(v) => onPatch(p.packageId, { vat: v })} className="w-full" />
+        ) : (
+          <span className="nums block text-center text-xs text-muted/70">{vat > 0 ? `%${vat}` : "—"}</span>
         )}
       </div>
 
@@ -194,7 +218,6 @@ export function CountEntryForm({
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [newRows, setNewRows] = useState<NewRow[]>([]);
   const [filter, setFilter] = useState("");
-  const [vat, setVat] = useState(""); // KDV oranı (%); boş = KDV yok
   const [invoiceTotal, setInvoiceTotal] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -253,7 +276,6 @@ export function CountEntryForm({
     setRows({});
     setNewRows([]);
     setFilter("");
-    setVat("");
     setInvoiceTotal("");
     setError(null);
     setOk(null);
@@ -261,23 +283,25 @@ export function CountEntryForm({
 
   // Aktif katalog kalemleri + yeni kalemler
   const activeCatalog = products.filter((p) => toQty(rows[p.packageId]?.qty ?? "") > 0);
-  const newTotal = newRows.reduce((s, r) => {
-    const q = toQty(r.qty);
-    if (!q || !r.price.trim()) return s;
-    try { return s + Math.round(tlToKurus(r.price) * q); } catch { return s; }
-  }, 0);
-  const catalogTotal = activeCatalog.reduce(
-    (s, p) => s + Math.round((priceKurus(rows[p.packageId], p) ?? 0) * toQty(rows[p.packageId].qty)),
-    0,
-  );
-  const subtotal = catalogTotal + newTotal;
-  // KDV oranı (% tam sayı); boş/0 ise KDV uygulanmaz. İrsaliye toplamı KDV dahil
-  // olduğundan çapraz-kontrol genel toplam (KDV dahil) üzerinden yapılır.
-  const vatRate = (() => {
-    const n = parseInt(vat.trim(), 10);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  })();
-  const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
+  // Kalem tutarları (KDV hariç) + her kalemin kendi KDV oranı (ürün bazlı).
+  const lines = [
+    ...activeCatalog.map((p) => ({
+      lineTotal: Math.round((priceKurus(rows[p.packageId], p) ?? 0) * toQty(rows[p.packageId].qty)),
+      vatRate: rowVat(rows[p.packageId], p),
+    })),
+    ...newRows.map((r) => {
+      const q = toQty(r.qty);
+      let lineTotal = 0;
+      if (q && r.price.trim()) {
+        try { lineTotal = Math.round(tlToKurus(r.price) * q); } catch { lineTotal = 0; }
+      }
+      return { lineTotal, vatRate: r.vat };
+    }),
+  ];
+  const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
+  const vatLines = vatBreakdown(lines);
+  const vatAmount = lines.reduce((s, l) => s + lineVat(l.lineTotal, l.vatRate), 0);
+  // İrsaliye toplamı KDV dahil olduğundan çapraz-kontrol genel toplam üzerinden yapılır.
   const total = subtotal + vatAmount;
   const itemCount = activeCatalog.length + newRows.filter((r) => toQty(r.qty) > 0 && r.name.trim()).length;
 
@@ -306,8 +330,7 @@ export function CountEntryForm({
       }),
     ],
     supplierName: supplier?.name ?? "",
-    vatRate,
-    vatAmount,
+    vatLines,
     total,
   });
 
@@ -330,6 +353,7 @@ export function CountEntryForm({
         productPackageId: p.packageId,
         quantity: qty,
         unitPriceTl: r.price.trim() || undefined,
+        vatRate: rowVat(r, p),
       });
     }
     // Yeni ürünler
@@ -347,13 +371,14 @@ export function CountEntryForm({
         quantity: qty,
         unitPriceTl: r.price,
         quantityInBase: toBaseCount(r.baseCount),
+        vatRate: r.vat,
       });
     }
     if (!items.length) return setError("En az bir kalem girin (adet yazın).");
 
     startTransition(async () => {
       try {
-        const res = await createPurchase({ supplierId, note, date, vatRate, items });
+        const res = await createPurchase({ supplierId, note, date, items });
         if (!res.ok) return setError(res.error);
         const { id } = res.data;
         setRows({});
@@ -362,7 +387,6 @@ export function CountEntryForm({
         setNote("");
         setDate(nowLocal());
         setFilter("");
-        setVat("");
         const savedNote = `Alış kaydedildi · ${items.length} kalem · ${formatKurus(total)}`;
         setOk(savedNote);
         setRecon({ id, supplierName: supplier?.name ?? "", note: savedNote });
@@ -441,9 +465,10 @@ export function CountEntryForm({
         </div>
 
         {/* Liste başlığı (geniş ekran) */}
-        <div className="hidden grid-cols-[minmax(0,1fr)_120px_76px_104px] items-center gap-2 px-5 pt-4 text-[11px] uppercase tracking-wider text-muted sm:grid">
+        <div className={`hidden ${COUNT_COLS} items-center gap-2 px-5 pt-4 text-[11px] uppercase tracking-wider text-muted sm:grid`}>
           <span>Ürün</span>
           <span className="text-right">Fiyat (ön-dolu)</span>
+          <span className="text-center">KDV</span>
           <span className="text-center">Adet</span>
           <span className="text-right">Tutar</span>
         </div>
@@ -484,14 +509,14 @@ export function CountEntryForm({
               {newRows.map((r, idx) => {
                 const packaging = isPackagingUnit(r.unit);
                 return (
-                  <div key={idx} className="grid grid-cols-1 gap-2 rounded-lg border border-ember/30 bg-ember-soft/30 p-2.5 sm:grid-cols-[minmax(0,1fr)_120px_76px_104px_28px] sm:items-start">
+                  <div key={idx} className="grid grid-cols-2 gap-2 rounded-lg border border-ember/30 bg-ember-soft/30 p-2.5 sm:grid-cols-[minmax(0,1fr)_120px_76px_104px_92px_28px] sm:items-start">
                     <input
                       value={r.name}
                       onChange={(e) => setNewRows((rs) => rs.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))}
                       placeholder="Yeni ürün adı"
-                      className={`${field} border-ember/50`}
+                      className={`${field} col-span-2 border-ember/50 sm:col-span-1`}
                     />
-                    <div className="flex flex-col gap-1">
+                    <div className="col-span-2 flex flex-col gap-1 sm:col-span-1">
                       <input
                         list="count-unit-suggestions"
                         value={r.unit}
@@ -522,6 +547,11 @@ export function CountEntryForm({
                       onChange={(e) => setNewRows((rs) => rs.map((x, i) => (i === idx ? { ...x, price: e.target.value } : x)))}
                       placeholder="Fiyat *"
                       className={`${field} nums text-right`}
+                    />
+                    <VatSelect
+                      value={r.vat}
+                      onChange={(v) => setNewRows((rs) => rs.map((x, i) => (i === idx ? { ...x, vat: v } : x)))}
+                      className="w-full"
                     />
                     <button
                       type="button"
@@ -587,7 +617,8 @@ export function CountEntryForm({
               <span className="nums text-lg font-semibold text-ink sm:text-xl">{formatKurus(total)}</span>
               {vatAmount > 0 && (
                 <span className="nums hidden text-[11px] text-muted sm:inline">
-                  ({formatKurus(subtotal)} + KDV %{vatRate} {formatKurus(vatAmount)})
+                  ({formatKurus(subtotal)} +{" "}
+                  {vatLines.map((v) => `KDV %${v.rate} ${formatKurus(v.amount)}`).join(" + ")})
                 </span>
               )}
               {invKurus != null && (
@@ -620,25 +651,13 @@ export function CountEntryForm({
             id={checksId}
             className={`${checksOpen ? "mt-3 grid" : "hidden"} gap-3 border-t border-line pt-3 sm:ml-auto sm:mt-0 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:border-0 sm:pt-0`}
           >
-            {vatAmount > 0 && (
-              <p className="nums text-[11px] text-muted sm:hidden">
-                Ara toplam {formatKurus(subtotal)} + KDV %{vatRate} {formatKurus(vatAmount)}
-              </p>
+            {/* KDV satır bazında (ürünün oranı); burada yalnızca döküm — telefonda */}
+            {vatLines.length > 0 && (
+              <VatSummary subtotal={subtotal} vatLines={vatLines} total={total} className="sm:hidden" />
             )}
 
-            {/* KDV + İrsaliye — telefonda iki sütun (etiket üstte), geniş ekranda yan yana */}
-            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6">
-              <label className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wider text-muted">KDV %</span>
-                <input
-                  inputMode="numeric"
-                  value={vat}
-                  onChange={(e) => setVat(e.target.value)}
-                  placeholder="ops."
-                  title="Opsiyonel. Boş = KDV yok. İrsaliye toplamı KDV dahil karşılaştırılır."
-                  className={`${field} nums text-right sm:w-16`}
-                />
-              </label>
+            {/* İrsaliye — KDV dahil genel toplamla karşılaştırılır */}
+            <div className="sm:flex sm:flex-wrap sm:items-center sm:gap-x-6">
 
               {/* İrsaliye çapraz-kontrolü */}
               <label className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">

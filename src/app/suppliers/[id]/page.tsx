@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { formatKurus, kurusToInput } from "@/lib/money";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { vatBreakdown, vatRatesLabel } from "@/lib/vat";
 import {
   deletePayment,
   deletePurchase,
@@ -98,7 +99,7 @@ export default async function SupplierDetailPage({
         documentNo: p.documentNo,
         sub:
           p.vatAmount > 0
-            ? `${itemsDesc} · +KDV %${p.vatRate} (${formatKurus(p.vatAmount)})`
+            ? `${itemsDesc} · +KDV ${vatRatesLabel(vatBreakdown(p.items))} (${formatKurus(p.vatAmount)})`
             : itemsDesc,
         id: p.id,
       };

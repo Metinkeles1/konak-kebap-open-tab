@@ -5,6 +5,7 @@ import Link from "next/link";
 import { deletePurchase } from "@/app/actions";
 import { formatKurus } from "@/lib/money";
 import { formatDateTime } from "@/lib/format";
+import { vatBreakdown } from "@/lib/vat";
 import { Money, Badge } from "@/components/ui";
 import { Modal } from "@/components/modal";
 import { ReconciliationPanel } from "@/components/reconciliation";
@@ -31,6 +32,14 @@ export function PurchaseModal({
   const [reconciling, setReconciling] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, startTransition] = useTransition();
+  // KDV kalem bazında: orana göre döküm (dondurulmuş tutarlarla).
+  const vatLines = vatBreakdown(
+    purchase.items.map((i) => ({
+      lineTotal: Math.round(i.unitPrice * i.quantity),
+      vatRate: i.vatRate,
+      vatAmount: i.vatAmount,
+    })),
+  );
 
   function remove() {
     const fd = new FormData();
@@ -83,7 +92,14 @@ export function PurchaseModal({
               <tbody className="divide-y divide-line">
                 {purchase.items.map((i) => (
                   <tr key={i.id}>
-                    <td className="px-2.5 sm:px-4 py-2.5 font-medium text-ink">{i.productName}</td>
+                    <td className="px-2.5 sm:px-4 py-2.5 font-medium text-ink">
+                      {i.productName}
+                      {i.vatRate > 0 && (
+                        <span className="nums mt-0.5 block text-[11px] font-normal text-muted">
+                          KDV %{i.vatRate}
+                        </span>
+                      )}
+                    </td>
                     <td className="nums whitespace-nowrap px-2.5 sm:px-4 py-2.5 text-right text-ink-soft">
                       {i.quantity} {i.unit}
                     </td>
@@ -107,14 +123,16 @@ export function PurchaseModal({
                         {formatKurus(purchase.subtotal)}
                       </td>
                     </tr>
-                    <tr>
-                      <td colSpan={3} className="px-2.5 sm:px-4 py-1.5 text-right text-xs text-muted">
-                        KDV %{purchase.vatRate}
-                      </td>
-                      <td className="nums px-2.5 sm:px-4 py-1.5 text-right text-xs text-ink-soft">
-                        {formatKurus(purchase.vatAmount)}
-                      </td>
-                    </tr>
+                    {vatLines.map((v) => (
+                      <tr key={v.rate}>
+                        <td colSpan={3} className="px-2.5 sm:px-4 py-1.5 text-right text-xs text-muted">
+                          KDV %{v.rate}
+                        </td>
+                        <td className="nums px-2.5 sm:px-4 py-1.5 text-right text-xs text-ink-soft">
+                          {formatKurus(v.amount)}
+                        </td>
+                      </tr>
+                    ))}
                   </>
                 )}
                 <tr className="border-t border-line bg-surface-2/50">

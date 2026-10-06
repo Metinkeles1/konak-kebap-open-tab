@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { ok, changed, fail, handleError } from "@/lib/api";
 import { purchaseCreateSchema } from "@/lib/validations";
+import { commonVatRate, lineVat, normVatRate } from "@/lib/vat";
 
 // GET /api/purchases — (silinmemiş) alışlar. ?supplierId=... ile filtrelenebilir.
 export async function GET(req: Request) {
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
     const packageIds = data.items.map((i) => i.productPackageId);
     const packages = await prisma.productPackage.findMany({
       where: { id: { in: packageIds }, deletedAt: null },
+      include: { product: { select: { vatRate: true } } },
     });
     const packageById = new Map(packages.map((p) => [p.id, p]));
 
@@ -50,18 +52,22 @@ export async function POST(req: Request) {
           `'${pkg.name}' birimi için fiyat gerekli (kayıtlı son fiyat yok)`,
         );
       }
+      const lineTotal = Math.round(unitPrice * item.quantity); // kuruş tam sayı kalsın
+      // KDV oranı: kalemde verilen → başlıkta verilen (tüm kalemler) → ürünün kayıtlı oranı.
+      const rate = normVatRate(item.vatRate ?? data.vatRate ?? pkg.product.vatRate);
       return {
         productPackageId: pkg.id,
         quantity: item.quantity,
         unitPrice,
-        lineTotal: Math.round(unitPrice * item.quantity), // kuruş tam sayı kalsın
+        lineTotal,
+        vatRate: rate,
+        vatAmount: lineVat(lineTotal, rate),
       };
     });
 
-    // KDV opsiyonel: ara toplam üzerinden hesaplanıp dondurulur.
-    const subtotal = resolvedItems.reduce((s, i) => s + i.lineTotal, 0);
-    const vatRate = data.vatRate && data.vatRate > 0 ? data.vatRate : null;
-    const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
+    // Alışın KDV'si = kalemlerin KDV toplamı (dondurulur).
+    const vatAmount = resolvedItems.reduce((s, i) => s + i.vatAmount, 0);
+    const vatRate = commonVatRate(resolvedItems);
 
     const purchase = await prisma.$transaction(async (tx) => {
       const row = await tx.purchase.create({

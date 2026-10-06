@@ -17,7 +17,12 @@ export type CatalogUnit = {
   lastPrice: number | null; // kuruş; bu toptancının son fiyatı, yoksa global son fiyat
   purchaseCount: number; // bu toptancıdan kaç (aktif) alışta geçti
 };
-export type CatalogProduct = { productId: string; name: string; units: CatalogUnit[] };
+export type CatalogProduct = {
+  productId: string;
+  name: string;
+  vatRate: number; // ürünün kayıtlı KDV oranı (%) — alış satırına varsayılan gelir
+  units: CatalogUnit[];
+};
 export type SupplierCatalog = Record<string, CatalogProduct[]>;
 
 // supplierIds bir Promise de olabilir: aşağıdaki sorgular id'lere bağlı değildir
@@ -77,6 +82,7 @@ export async function loadCatalog(supplierIdsInput: string[] | Promise<string[]>
       .map((p) => ({
         productId: p.id,
         name: p.name,
+        vatRate: p.vatRate,
         units: p.packages.map((pkg) => ({
           packageId: pkg.id,
           unit: pkg.name,
@@ -93,6 +99,7 @@ export async function loadCatalog(supplierIdsInput: string[] | Promise<string[]>
   const allProducts: CatalogProduct[] = products.map((p) => ({
     productId: p.id,
     name: p.name,
+    vatRate: p.vatRate,
     units: p.packages.map((pkg) => ({
       packageId: pkg.id,
       unit: pkg.name,

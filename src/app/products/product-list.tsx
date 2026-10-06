@@ -10,6 +10,7 @@ export type ProductDetail = {
   id: string;
   name: string;
   baseUnit: string;
+  vatRate: number; // ürünün KDV oranı (%)
   defaultSupplierName: string | null;
   suppliers: { id: string; name: string; isDefault: boolean }[];
   units: {
@@ -117,6 +118,11 @@ export function ProductList({
                       <span className="font-medium text-ink transition-colors group-hover:text-ember">
                         {p.name}
                       </span>
+                      {p.vatRate > 0 && (
+                        <span className="nums ml-2 rounded bg-ember-soft px-1.5 py-0.5 align-middle text-[10px] font-medium text-ember">
+                          KDV %{p.vatRate}
+                        </span>
+                      )}
                       {p.defaultSupplierName && (
                         <span className="mt-0.5 block truncate text-xs text-muted">
                           {p.defaultSupplierName}

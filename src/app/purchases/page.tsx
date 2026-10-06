@@ -40,7 +40,6 @@ export default async function PurchasesPage() {
     documentNo: p.documentNo,
     note: p.note,
     subtotal,
-    vatRate: p.vatRate,
     vatAmount: p.vatAmount,
     total: subtotal + p.vatAmount, // KDV dahil
     items: p.items.map((i) => ({
@@ -51,6 +50,8 @@ export default async function PurchasesPage() {
       unit: i.package.name,
       quantity: i.quantity,
       unitPrice: i.unitPrice,
+      vatRate: i.vatRate,
+      vatAmount: i.vatAmount,
     })),
     };
   });

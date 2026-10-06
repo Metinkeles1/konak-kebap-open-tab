@@ -5,6 +5,7 @@ import { createProduct } from "@/app/actions";
 import { inputClass } from "@/components/ui";
 import { SubmitButton } from "@/components/form";
 import { isPackagingUnit } from "@/lib/units";
+import { VAT_PRESETS } from "@/lib/vat";
 
 // Alış birimi önerileri (sınırlayıcı değil — istediğini yazabilirsin)
 const UNIT_SUGGESTIONS = ["Adet", "Koli", "Kasa", "Paket", "Balya", "Kg", "Gram", "Litre", "ML", "Çuval", "Teneke", "Rulo"];
@@ -83,6 +84,16 @@ export function NewProductForm({
             />
           </label>
         )}
+        <label className={`${label} sm:min-w-24 sm:flex-1`}>
+          KDV
+          <select name="vatRate" defaultValue="0" className={inputClass} title="Alışlarda bu ürüne otomatik gelir">
+            {VAT_PRESETS.map((r) => (
+              <option key={r} value={r}>
+                {r === 0 ? "KDV yok" : `%${r}`}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className={`${label} sm:min-w-28 sm:flex-1`}>
           Fiyat (TL)
           <input name="price" inputMode="decimal" placeholder="Opsiyonel" className={inputClass} />

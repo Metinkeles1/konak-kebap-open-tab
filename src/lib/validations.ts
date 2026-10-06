@@ -45,8 +45,10 @@ export const purchaseItemSchema = z.object({
   quantity: z.number().positive(), // kg gibi ondalık olabilir
   // gönderilmezse o birimin lastUnitPrice değeri kullanılır
   unitPrice: kurus.optional(),
+  // KDV oranı (% tam sayı); gönderilmezse başlıktaki oran, o da yoksa ürünün oranı
+  vatRate: z.number().int().min(0).max(100).optional(),
 });
-// KDV oranı (% tam sayı). Opsiyonel; girilmezse KDV uygulanmaz.
+// Başlık KDV oranı (% tam sayı). Verilirse TÜM kalemlere uygulanır (geriye uyumluluk).
 const vatRate = z.number().int().min(0).max(100);
 export const purchaseCreateSchema = z.object({
   supplierId: z.string().min(1),
@@ -57,10 +59,10 @@ export const purchaseCreateSchema = z.object({
   note: z.string().optional(),
   items: z.array(purchaseItemSchema).min(1, "En az bir kalem gerekli"),
 });
-// Alış kalemleri DONDURULDUĞU için yalnızca başlık alanları güncellenebilir.
+// Alış kalemleri (fiyat + KDV) DONDURULDUĞU için yalnızca başlık alanları güncellenebilir.
+// KDV kalem bazında tutulur; düzeltme uygulamadaki "Alışı düzenle" ile yapılır.
 export const purchaseUpdateSchema = z.object({
   date: z.coerce.date().optional(),
-  vatRate: vatRate.optional(),
   note: z.string().optional(),
 });
 

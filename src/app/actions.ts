@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { tlToKurus } from "@/lib/money";
+import { commonVatRate, lineVat, normVatRate } from "@/lib/vat";
 import { getPurchaseReconciliation, getBalanceReconciliation } from "@/lib/reconciliation";
 import {
   supplierCreateSchema,
@@ -191,6 +192,7 @@ async function createProductImpl(fd: FormData) {
         name: data.name,
         baseUnit: data.baseUnit,
         defaultSupplierId: data.defaultSupplierId,
+        vatRate: normVatRate(str(fd, "vatRate")),
         // Birim girildiyse ürünü ilk alış birimi (+ varsa son fiyat) ile birlikte oluştur.
         ...(unit
           ? { packages: { create: { name: unit, quantityInBase: qib, lastUnitPrice: price } } }
@@ -400,6 +402,18 @@ export async function setDefaultSupplier(fd: FormData) {
   revalidateAll();
 }
 
+// Ürünün KDV oranı — alışlarda bu ürünün kalemine varsayılan gelir. Geçmiş alışlar
+// etkilenmez (kalemdeki oran dondurulmuştur).
+export async function setProductVatRate(fd: FormData) {
+  const productId = str(fd, "productId");
+  if (!productId) return;
+  await prisma.product.update({
+    where: { id: productId },
+    data: { vatRate: normVatRate(str(fd, "vatRate")) },
+  });
+  revalidateAll();
+}
+
 export async function deleteProduct(fd: FormData) {
   const id = str(fd, "id");
   if (!id) return;
@@ -423,6 +437,7 @@ export type NewPurchaseItem =
       productPackageId: string;
       quantity: number;
       unitPriceTl?: string; // boşsa birimin son fiyatı kullanılır
+      vatRate?: number; // kalemin KDV oranı (%); verilmezse ürünün kayıtlı oranı
     }
   | {
       kind: "newUnit";
@@ -431,6 +446,7 @@ export type NewPurchaseItem =
       quantity: number;
       unitPriceTl: string;
       quantityInBase?: number; // bu paket kaç baz birim içerir (örn. 1 koli = 24 adet)
+      vatRate?: number;
     }
   | {
       kind: "new";
@@ -439,6 +455,7 @@ export type NewPurchaseItem =
       quantity: number;
       unitPriceTl: string;
       quantityInBase?: number; // bu paket kaç baz birim içerir
+      vatRate?: number;
     };
 
 // Paketteki baz birim sayısını normalle (pozitif tam sayı, en az 1).
@@ -446,16 +463,6 @@ const normQib = (n?: number) => {
   const v = Math.round(n ?? 1);
   return Number.isFinite(v) && v > 0 ? v : 1;
 };
-
-// KDV oranını normalle: pozitif tam sayı (%); yoksa null (KDV uygulanmaz).
-const normVatRate = (n?: number | null): number | null => {
-  const v = Math.round(n ?? 0);
-  return Number.isFinite(v) && v > 0 ? v : null;
-};
-
-// Ara toplamdan (KDV hariç, kuruş) KDV tutarını hesapla; oran yoksa 0.
-const computeVat = (subtotal: number, rate: number | null): number =>
-  rate ? Math.round((subtotal * rate) / 100) : 0;
 
 // Serbest birim etiketini şemadaki Unit enum'una eşle (baseUnit için).
 const UNIT_TO_BASE: Record<string, "ADET" | "LITRE" | "KG" | "ML" | "GR" | "PAKET"> = {
@@ -471,8 +478,7 @@ async function createPurchaseImpl(input: {
   supplierId: string;
   note?: string;
   date?: string; // ISO (datetime); boşsa şimdi
-  vatRate?: number; // KDV oranı (%); boş/0 ise KDV uygulanmaz
-  items: NewPurchaseItem[];
+  items: NewPurchaseItem[]; // KDV kalem bazında (vatRate), bkz. @/lib/vat
 }) {
   const items = input.items.filter((i) => {
     if (i.quantity <= 0) return false;
@@ -489,9 +495,19 @@ async function createPurchaseImpl(input: {
   const packages = existingIds.length
     ? await prisma.productPackage.findMany({
         where: { id: { in: existingIds }, deletedAt: null },
+        include: { product: { select: { id: true, vatRate: true } } },
       })
     : [];
   const byId = new Map(packages.map((p) => [p.id, p]));
+  // "Yeni birim" kalemlerinin ürünlerinin kayıtlı KDV oranı
+  const newUnitProductIds = items.flatMap((i) => (i.kind === "newUnit" ? [i.productId] : []));
+  const newUnitProducts = newUnitProductIds.length
+    ? await prisma.product.findMany({
+        where: { id: { in: newUnitProductIds } },
+        select: { id: true, vatRate: true },
+      })
+    : [];
+  const productVat = new Map(newUnitProducts.map((p) => [p.id, p.vatRate]));
 
   // Boş bırakılan fiyatlar için: bu toptancının bu birimdeki EN SON fiyatı.
   // Böylece otomatik dolan fiyat global değil, seçilen toptancıya özgü olur.
@@ -515,11 +531,18 @@ async function createPurchaseImpl(input: {
       quantity: number;
       unitPrice: number;
       lineTotal: number;
+      vatRate: number;
+      vatAmount: number;
     }[] = [];
+    // Kalemde ürünün kayıtlı oranından farklı bir KDV seçildiyse ürüne de yazılır
+    // (sonraki alışlarda o oran gelir) — productId → yeni oran.
+    const productVatUpdates = new Map<string, number>();
 
     for (const item of items) {
       let productPackageId: string;
       let unitPrice: number;
+      let productId: string;
+      let productRate: number; // ürünün şu anki kayıtlı KDV oranı
 
       if (item.kind === "new") {
         const price = item.unitPriceTl.trim().length ? tlToKurus(item.unitPriceTl) : null;
@@ -540,6 +563,8 @@ async function createPurchaseImpl(input: {
               data: { productId: existing.id, name: item.unit, quantityInBase: normQib(item.quantityInBase), lastUnitPrice: price },
             }));
           productPackageId = pkg.id;
+          productId = existing.id;
+          productRate = existing.vatRate;
         } else {
           // Yeni ürünü o toptancıya bağlı olarak oluştur (bir sonraki sefer hazır gelir)
           const product = await tx.product.create({
@@ -547,11 +572,14 @@ async function createPurchaseImpl(input: {
               name: item.name.trim(),
               baseUnit: UNIT_TO_BASE[item.unit] ?? "ADET",
               defaultSupplierId: input.supplierId,
+              vatRate: normVatRate(item.vatRate),
               packages: { create: { name: item.unit, quantityInBase: normQib(item.quantityInBase), lastUnitPrice: price } },
             },
             include: { packages: true },
           });
           productPackageId = product.packages[0].id;
+          productId = product.id;
+          productRate = product.vatRate;
         }
         unitPrice = price;
       } else if (item.kind === "newUnit") {
@@ -563,6 +591,8 @@ async function createPurchaseImpl(input: {
         });
         productPackageId = pkg.id;
         unitPrice = price;
+        productId = item.productId;
+        productRate = productVat.get(item.productId) ?? 0;
       } else {
         const pkg = byId.get(item.productPackageId);
         if (!pkg) throw new Error("Alış birimi bulunamadı");
@@ -574,13 +604,22 @@ async function createPurchaseImpl(input: {
         }
         productPackageId = pkg.id;
         unitPrice = resolvedPrice;
+        productId = pkg.product.id;
+        productRate = pkg.product.vatRate;
       }
 
+      // KDV: kalemde seçilen oran, yoksa ürünün kayıtlı oranı. Tutar kalem bazında
+      // hesaplanıp DONDURULUR.
+      const vatRate = item.vatRate != null ? normVatRate(item.vatRate) : productRate;
+      if (vatRate !== productRate) productVatUpdates.set(productId, vatRate);
+      const lineTotal = Math.round(unitPrice * item.quantity); // kuruş tam sayı kalsın
       resolved.push({
         productPackageId,
         quantity: item.quantity,
         unitPrice,
-        lineTotal: Math.round(unitPrice * item.quantity), // kuruş tam sayı kalsın
+        lineTotal,
+        vatRate,
+        vatAmount: lineVat(lineTotal, vatRate),
       });
     }
 
@@ -588,10 +627,9 @@ async function createPurchaseImpl(input: {
     const count = await tx.purchase.count();
     const documentNo = `ALŞ-${String(count + 1).padStart(4, "0")}`;
 
-    // KDV opsiyonel: ara toplam (kalem tutarları) üzerinden hesaplanıp DONDURULUR.
-    const subtotal = resolved.reduce((s, r) => s + r.lineTotal, 0);
-    const vatRate = normVatRate(input.vatRate);
-    const vatAmount = computeVat(subtotal, vatRate);
+    // Alışın KDV'si = kalemlerin (dondurulmuş) KDV toplamı; tek oran varsa başlığa da yazılır.
+    const vatAmount = resolved.reduce((s, r) => s + r.vatAmount, 0);
+    const vatRate = commonVatRate(resolved);
 
     const created = await tx.purchase.create({
       select: { id: true },
@@ -622,6 +660,10 @@ async function createPurchaseImpl(input: {
         data: { lastUnitPrice: item.unitPrice },
       });
     }
+    // Kalemde değiştirilen KDV oranı ürünün yeni varsayılanı olur.
+    for (const [id, vatRate] of productVatUpdates) {
+      await tx.product.update({ where: { id }, data: { vatRate } });
+    }
     return created.id;
   }, {
     // Çok kalemli alış + uzak Neon'a onlarca gidiş-dönüş varsayılan 5 sn'yi
@@ -646,6 +688,7 @@ export type EditPurchaseItem = {
   productPackageId: string;
   quantity: number;
   unitPriceTl: string; // boşsa: mevcut kalemin fiyatı, o da yoksa birimin son fiyatı
+  vatRate?: number; // boşsa: mevcut kalemin oranı, yeni kalemde ürünün oranı
 };
 
 async function updatePurchaseImpl(input: {
@@ -653,8 +696,7 @@ async function updatePurchaseImpl(input: {
   supplierId: string;
   date?: string;
   note?: string;
-  vatRate?: number; // KDV oranı (%); boş/0 ise KDV kaldırılır
-  items: EditPurchaseItem[];
+  items: EditPurchaseItem[]; // KDV kalem bazında
 }) {
   const purchase = await prisma.purchase.findFirst({
     where: { id: input.id, deletedAt: null },
@@ -673,9 +715,12 @@ async function updatePurchaseImpl(input: {
   const pkgIds = [...new Set(items.map((i) => i.productPackageId))];
   const packages = await prisma.productPackage.findMany({
     where: { id: { in: pkgIds }, deletedAt: null },
+    include: { product: { select: { id: true, vatRate: true } } },
   });
   const pkgById = new Map(packages.map((p) => [p.id, p]));
   const existingById = new Map(purchase.items.map((i) => [i.id, i]));
+  // Düzeltmede ELLE değiştirilen KDV oranı ürüne de yazılır (yeni alış formuyla aynı kural).
+  const productVatUpdates = new Map<string, number>();
 
   const resolved = items.map((i) => {
     const pkg = pkgById.get(i.productPackageId);
@@ -690,22 +735,36 @@ async function updatePurchaseImpl(input: {
       unitPrice = pkg.lastUnitPrice;
     }
     if (unitPrice == null) throw new Error(`'${pkg.name}' için fiyat gerekli`);
+    // KDV: girilen oran → (dokunulmadıysa) kalemin dondurulmuş oranı → ürünün oranı.
+    const sameItem = old && old.productPackageId === pkg.id;
+    const prevRate = sameItem ? old.vatRate : pkg.product.vatRate;
+    const vatRate = i.vatRate != null ? normVatRate(i.vatRate) : prevRate;
+    if (vatRate !== prevRate && vatRate !== pkg.product.vatRate) {
+      productVatUpdates.set(pkg.product.id, vatRate);
+    }
+    const lineTotal = Math.round(unitPrice * i.quantity); // kuruş tam sayı kalsın
+    // Tutarı ve oranı aynı kalan eski kalemin KDV'si yeniden yuvarlanmaz (dondurulmuş).
+    const vatAmount =
+      sameItem && old.lineTotal === lineTotal && old.vatRate === vatRate
+        ? old.vatAmount
+        : lineVat(lineTotal, vatRate);
     return {
       id: old ? i.id : undefined,
       productPackageId: pkg.id,
       quantity: i.quantity,
       unitPrice,
-      lineTotal: Math.round(unitPrice * i.quantity), // kuruş tam sayı kalsın
+      lineTotal,
+      vatRate,
+      vatAmount,
     };
   });
 
   const keptIds = new Set(resolved.map((r) => r.id).filter(Boolean) as string[]);
   const toDelete = purchase.items.filter((i) => !keptIds.has(i.id)).map((i) => i.id);
 
-  // KDV'yi düzeltilmiş ara toplamdan yeniden hesapla (kalemler değişmiş olabilir).
-  const subtotal = resolved.reduce((s, r) => s + r.lineTotal, 0);
-  const vatRate = normVatRate(input.vatRate);
-  const vatAmount = computeVat(subtotal, vatRate);
+  // Alışın KDV'si = düzeltilmiş kalemlerin KDV toplamı.
+  const vatAmount = resolved.reduce((s, r) => s + r.vatAmount, 0);
+  const vatRate = commonVatRate(resolved);
 
   await prisma.$transaction(async (tx) => {
     if (toDelete.length) {
@@ -720,6 +779,8 @@ async function updatePurchaseImpl(input: {
             quantity: r.quantity,
             unitPrice: r.unitPrice,
             lineTotal: r.lineTotal,
+            vatRate: r.vatRate,
+            vatAmount: r.vatAmount,
           },
         });
       } else {
@@ -730,6 +791,8 @@ async function updatePurchaseImpl(input: {
             quantity: r.quantity,
             unitPrice: r.unitPrice,
             lineTotal: r.lineTotal,
+            vatRate: r.vatRate,
+            vatAmount: r.vatAmount,
           },
         });
       }
@@ -744,6 +807,9 @@ async function updatePurchaseImpl(input: {
         vatAmount,
       },
     });
+    for (const [id, rate] of productVatUpdates) {
+      await tx.product.update({ where: { id }, data: { vatRate: rate } });
+    }
   }, {
     // Çok kalemli düzenleme + uzak Neon gidiş-dönüşleri varsayılan 5 sn'yi aşabilir.
     timeout: 30_000,

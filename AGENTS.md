@@ -41,6 +41,11 @@ adapter `@prisma/adapter-pg`) · Neon Postgres · Zod 4 · Tailwind 4.
   Next production'da fırlatılan hatanın metnini gizler ("Minified React error #441").
 - **Zaman bazlı `export const revalidate` KOYMA:** Next 16.3'te kayıt sonrası tazeleme +
   önyüklemeyle birleşince sayfanın önyükleme istekleri yanıtsız kalıyordu.
+- **KDV ürün bazlıdır:** `Product.vatRate` varsayılan oran; her `PurchaseItem` kendi
+  `vatRate`/`vatAmount`'unu DONDURUR (fiyat gibi). `Purchase.vatAmount` = kalemlerin
+  toplamı (cari bakiye bunu kullanır); `Purchase.vatRate` yalnızca tüm kalemler aynı
+  orandaysa dolu. Alışta satırda değiştirilen oran ürüne de yazılır. Hesaplar yalnızca
+  [src/lib/vat.ts](src/lib/vat.ts) üzerinden.
 - **Girdi doğrulama:** Zod şemaları [src/lib/validations.ts](src/lib/validations.ts) içinde.
 - Import alias `@/*` → `src/*`.
 

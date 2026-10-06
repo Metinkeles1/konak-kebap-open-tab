@@ -4,12 +4,14 @@ import { useMemo, useState, useTransition } from "react";
 import { createPurchase, type NewPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
 import { isPackagingUnit } from "@/lib/units";
+import { lineVat, vatBreakdown } from "@/lib/vat";
+import { VatSelect, VatSummary } from "@/components/vat";
 import { buildOrderText, WhatsAppButton, type OrderLine } from "@/components/whatsapp";
 import { ReconciliationDialog } from "@/components/reconciliation";
 
 type SupplierOpt = { id: string; name: string; phone: string | null };
 type Unit = { packageId: string; unit: string; lastPrice: number | null };
-export type CatalogProduct = { productId: string; name: string; units: Unit[] };
+export type CatalogProduct = { productId: string; name: string; vatRate: number; units: Unit[] };
 type Catalog = Record<string, CatalogProduct[]>;
 
 type Row = {
@@ -21,6 +23,7 @@ type Row = {
   baseCount: string; // yeni birim için: 1 paket kaç baz birim (1 koli = 24)
   quantity: string;
   price: string;
+  vat: number; // KDV oranı (%) — ürün seçilince ürünün kayıtlı oranı gelir
   open: boolean;
 };
 
@@ -36,6 +39,7 @@ const newRow = (): Row => ({
   baseCount: "",
   quantity: "1",
   price: "",
+  vat: 0,
   open: false,
 });
 
@@ -45,6 +49,10 @@ const field =
 const lc = (s: string) => s.trim().toLocaleLowerCase("tr");
 
 const MAX_MATCHES = 50;
+
+// Satır ızgarası: telefonda [ürün/birim/fiyat | adet/KDV | ✕], geniş ekranda tek satır.
+const ROW_COLS =
+  "grid-cols-[minmax(0,1fr)_5.5rem_28px] sm:grid-cols-[minmax(0,1fr)_130px_72px_110px_92px_28px]";
 
 // Adet metnini sayıya çevir — kg için ondalık olabilir ("2,5" → 2.5)
 const toQty = (s: string) => {
@@ -76,7 +84,6 @@ export function NewPurchaseForm({
   const [supplierId, setSupplierId] = useState("");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(nowLocal());
-  const [vat, setVat] = useState(""); // KDV oranı (%); boş = KDV yok
   const [rows, setRows] = useState<Row[]>([newRow()]);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -117,18 +124,14 @@ export function NewPurchaseForm({
     return selectedPkg(row)?.lastPrice ?? null;
   }
 
-  const subtotal = rows.reduce((sum, r) => {
-    const qty = toQty(r.quantity);
+  // Kalem tutarları (KDV hariç) + her satırın kendi KDV oranı → orana göre döküm.
+  const lines = rows.map((r) => {
     const price = rowPriceKurus(r);
-    return sum + (price != null ? qty * price : 0);
-  }, 0);
-  // KDV oranı (% tam sayı); boş/0 ise KDV uygulanmaz.
-  const vatRate = (() => {
-    const n = parseInt(vat.trim(), 10);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  })();
-  const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
-  const total = subtotal + vatAmount;
+    return { lineTotal: price != null ? Math.round(toQty(r.quantity) * price) : 0, vatRate: r.vat };
+  });
+  const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
+  const vatLines = vatBreakdown(lines);
+  const total = subtotal + lines.reduce((s, l) => s + lineVat(l.lineTotal, l.vatRate), 0);
 
   // WhatsApp sipariş mesajı — adedi girilmiş, ürünü belli kalemler (sayım moduyla aynı biçim).
   const supplier = suppliers.find((s) => s.id === supplierId);
@@ -142,8 +145,7 @@ export function NewPurchaseForm({
   const orderText = buildOrderText({
     lines: orderLines,
     supplierName: supplier?.name ?? "",
-    vatRate,
-    vatAmount,
+    vatLines,
     total,
   });
 
@@ -154,7 +156,6 @@ export function NewPurchaseForm({
   function changeSupplier(id: string) {
     setSupplierId(id);
     setRows([newRow()]);
-    setVat("");
     setError(null);
   }
 
@@ -167,6 +168,7 @@ export function NewPurchaseForm({
       unitText: "",
       open: false,
       price: "",
+      vat: product.vatRate, // ürünün kayıtlı KDV oranı; değiştirilirse ürüne de yazılır
     });
   }
   function pickNewProduct(idx: number) {
@@ -188,17 +190,17 @@ export function NewPurchaseForm({
         if (!r.price.trim()) return setError(`'${r.query.trim()}' için fiyat girin.`);
         if (isPackagingUnit(unit) && !toBaseCount(r.baseCount))
           return setError(`'${r.query.trim()}' · ${unit}: 1 ${unit} kaç adet? girin.`);
-        payload.push({ kind: "new", name: r.query.trim(), unit, quantity: qty, unitPriceTl: r.price, quantityInBase: toBaseCount(r.baseCount) });
+        payload.push({ kind: "new", name: r.query.trim(), unit, quantity: qty, unitPriceTl: r.price, quantityInBase: toBaseCount(r.baseCount), vatRate: r.vat });
       } else if (r.productId) {
         if (r.unitChoice.startsWith("pkg:")) {
-          payload.push({ kind: "existing", productPackageId: r.unitChoice.slice(4), quantity: qty, unitPriceTl: r.price });
+          payload.push({ kind: "existing", productPackageId: r.unitChoice.slice(4), quantity: qty, unitPriceTl: r.price, vatRate: r.vat });
         } else if (r.unitChoice === "__new__") {
           const unit = r.unitText.trim();
           if (!unit) return setError(`'${r.query}' için birim adı yazın (ör. Koli).`);
           if (!r.price.trim()) return setError(`'${r.query}' · ${unit} için fiyat girin.`);
           if (isPackagingUnit(unit) && !toBaseCount(r.baseCount))
             return setError(`'${r.query}' · ${unit}: 1 ${unit} kaç adet? girin.`);
-          payload.push({ kind: "newUnit", productId: r.productId, unit, quantity: qty, unitPriceTl: r.price, quantityInBase: toBaseCount(r.baseCount) });
+          payload.push({ kind: "newUnit", productId: r.productId, unit, quantity: qty, unitPriceTl: r.price, quantityInBase: toBaseCount(r.baseCount), vatRate: r.vat });
         }
       }
     }
@@ -206,7 +208,7 @@ export function NewPurchaseForm({
 
     startTransition(async () => {
       try {
-        const res = await createPurchase({ supplierId, note, date, vatRate, items: payload });
+        const res = await createPurchase({ supplierId, note, date, items: payload });
         if (!res.ok) return setError(res.error);
         const { id } = res.data;
         setRecon({
@@ -217,7 +219,6 @@ export function NewPurchaseForm({
         setRows([newRow()]);
         setNote("");
         setDate(nowLocal());
-        setVat("");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Hata oluştu");
       }
@@ -288,11 +289,12 @@ export function NewPurchaseForm({
               <span className="text-muted/70">(bu toptancıya bağlı olmayanlar dahil)</span>
             </label>
 
-            <div className="hidden grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted sm:grid">
+            <div className={`hidden ${ROW_COLS} items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted sm:grid`}>
               <span>Ürün</span>
               <span>Birim</span>
               <span>Adet</span>
               <span>Birim fiyat</span>
+              <span>KDV</span>
               <span />
             </div>
 
@@ -322,9 +324,9 @@ export function NewPurchaseForm({
 
                 return (
                   <div key={idx} className="space-y-1">
-                  <div className="grid grid-cols-[minmax(0,1fr)_4rem_minmax(0,1.2fr)_28px] items-center gap-2 rounded-lg border border-line p-2 sm:grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] sm:border-0 sm:p-0">
+                  <div className={`grid ${ROW_COLS} items-center gap-2 rounded-lg border border-line p-2 sm:border-0 sm:p-0`}>
                     {/* Ürün combobox */}
-                    <div className="relative order-1 col-span-3 sm:col-span-1">
+                    <div className="relative order-1 col-span-2 sm:col-span-1">
                       <input
                         value={row.query}
                         onChange={(e) =>
@@ -431,19 +433,24 @@ export function NewPurchaseForm({
                       onChange={(e) => patch(idx, { quantity: e.target.value })}
                       placeholder="Adet"
                       title="Adet (kg için ondalık girebilirsiniz, ör. 2,5)"
-                      className={`${field} nums order-4 sm:order-3`}
+                      className={`${field} nums order-4 col-span-2 sm:order-3 sm:col-span-1`}
                     />
                     <input
                       inputMode="decimal"
                       value={row.price}
                       onChange={(e) => patch(idx, { price: e.target.value })}
                       placeholder={pkg?.lastPrice != null ? `son ${formatKurus(pkg.lastPrice)}` : freeUnit ? "Fiyat *" : "Fiyat"}
-                      className={`${field} nums order-5 col-span-2 sm:order-4 sm:col-span-1`}
+                      className={`${field} nums order-5 sm:order-4`}
+                    />
+                    <VatSelect
+                      value={row.vat}
+                      onChange={(v) => patch(idx, { vat: v })}
+                      className="order-6 col-span-2 w-full sm:order-5 sm:col-span-1"
                     />
                     <button
                       type="button"
                       onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((_, i) => i !== idx) : [newRow()]))}
-                      className="order-2 grid h-9 w-7 place-items-center rounded-lg text-muted transition-colors hover:bg-debt-soft hover:text-debt sm:order-5"
+                      className="order-2 grid h-9 w-7 place-items-center rounded-lg text-muted transition-colors hover:bg-debt-soft hover:text-debt sm:order-6"
                       title="Kalemi kaldır"
                     >
                       ✕
@@ -471,31 +478,9 @@ export function NewPurchaseForm({
             </button>
 
             <div className="flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex items-end gap-4">
-                <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted">
-                  KDV (%)
-                  <input
-                    inputMode="numeric"
-                    value={vat}
-                    onChange={(e) => setVat(e.target.value)}
-                    placeholder="Ops. (20)"
-                    title="Opsiyonel. Boş = KDV yok. Tutar ara toplamdan hesaplanır."
-                    className={`${field} nums w-24`}
-                  />
-                </label>
-                <div className="text-sm text-muted">
-                  {vatAmount > 0 && (
-                    <div className="text-[11px]">
-                      Ara toplam <span className="nums text-ink-soft">{formatKurus(subtotal)}</span>
-                      {" · "}KDV %{vatRate} <span className="nums text-ink-soft">{formatKurus(vatAmount)}</span>
-                    </div>
-                  )}
-                  <div>
-                    {vatAmount > 0 ? "Genel toplam" : "Toplam"}{" "}
-                    <span className="nums ml-1 text-lg font-semibold text-ink">{formatKurus(total)}</span>
-                  </div>
-                </div>
-              </div>
+              {/* KDV satır bazında seçilir (ürünün kayıtlı oranı gelir); burada orana göre döküm */}
+              <VatSummary subtotal={subtotal} vatLines={vatLines} total={total} />
+
               <div className="grid grid-cols-1 gap-2 sm:flex">
                 <WhatsAppButton phone={supplier?.phone} text={orderText} disabled={orderLines.length === 0} />
                 <button

@@ -3,13 +3,16 @@
 // (tarihe göre; aynı anda alış ödemeden önce), böylece mesajdaki "önceki bakiye"
 // ve "bu alış sonrası bakiye" ekstredeki yürüyen bakiyeyle tutar.
 import { prisma } from "@/lib/prisma";
+import { vatBreakdown, type VatLine } from "@/lib/vat";
 
 export type ReconItem = {
   name: string;
   unit: string;
   quantity: number;
   unitPrice: number; // kuruş
-  lineTotal: number; // kuruş
+  lineTotal: number; // kuruş (KDV hariç)
+  vatRate: number; // %
+  vatAmount: number; // kuruş (dondurulmuş)
 };
 
 export type PurchaseReconciliation = {
@@ -20,7 +23,8 @@ export type PurchaseReconciliation = {
   documentNo: string | null;
   items: ReconItem[];
   subtotal: number;
-  vatRate: number | null;
+  /** KDV oranlara göre (ör. %1: ₺x, %10: ₺y). */
+  vatLines: VatLine[];
   vatAmount: number;
   total: number;
   /** Bu alıştan hemen önceki bakiye (ekstre sırasıyla). */
@@ -116,6 +120,8 @@ export async function getPurchaseReconciliation(
     quantity: i.quantity,
     unitPrice: i.unitPrice,
     lineTotal: i.lineTotal,
+    vatRate: i.vatRate,
+    vatAmount: i.vatAmount,
   }));
   const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
 
@@ -127,7 +133,7 @@ export async function getPurchaseReconciliation(
     documentNo: purchase.documentNo,
     items,
     subtotal,
-    vatRate: purchase.vatRate,
+    vatLines: vatBreakdown(items),
     vatAmount: purchase.vatAmount,
     total: subtotal + purchase.vatAmount,
     balanceBefore,

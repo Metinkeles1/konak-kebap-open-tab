@@ -86,6 +86,7 @@ export default async function ProductsPage() {
       id: p.id,
       name: p.name,
       baseUnit: p.baseUnit,
+      vatRate: p.vatRate,
       defaultSupplierName: p.defaultSupplier?.name ?? null,
       suppliers: supplierCols,
       units,

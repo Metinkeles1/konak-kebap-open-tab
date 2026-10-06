@@ -3,6 +3,7 @@
 import { formatKurus } from "@/lib/money";
 import { formatDate } from "@/lib/format";
 import type { PurchaseReconciliation, BalanceReconciliation } from "@/lib/reconciliation";
+import type { VatLine } from "@/lib/vat";
 
 export type OrderLine = {
   quantity: number;
@@ -29,14 +30,12 @@ export function waPhone(phone: string | null | undefined): string | null {
 export function buildOrderText({
   lines,
   supplierName,
-  vatRate,
-  vatAmount,
+  vatLines,
   total,
 }: {
   lines: OrderLine[];
   supplierName: string;
-  vatRate: number;
-  vatAmount: number;
+  vatLines: VatLine[]; // orana göre KDV (ürün bazlı)
   total: number;
 }): string {
   const out: string[] = ["Merhaba, Konak Kebap sipariş:", ""];
@@ -45,7 +44,7 @@ export function buildOrderText({
     out.push(`• ${fmtQty(l.quantity)} ${l.unit} ${l.name}${priceTxt}`);
   }
   out.push("");
-  if (vatAmount > 0) out.push(`KDV %${vatRate}: ${formatKurus(vatAmount)}`);
+  for (const v of vatLines) out.push(`KDV %${v.rate}: ${formatKurus(v.amount)}`);
   out.push(`Toplam: ${formatKurus(total)}`);
   out.push("", `— ${supplierName}`);
   return out.join("\n");
@@ -69,15 +68,18 @@ const RECON_CLOSING =
 export function buildPurchaseReconText(r: PurchaseReconciliation): string {
   const out: string[] = ["Merhaba, Konak Kebap — cari mutabakat", ""];
   out.push(`*Alış: ${formatDate(r.date)}*${r.documentNo ? ` · ${r.documentNo}` : ""}`);
+  // Birden çok KDV oranı varsa kalemin yanında oranı da yazılır (hangi ürün % kaç).
+  const mixed = r.vatLines.length > 1;
   for (const i of r.items) {
+    const vatTxt = mixed && i.vatRate > 0 ? ` (KDV %${i.vatRate})` : "";
     out.push(
-      `• ${fmtQty(i.quantity)} ${i.unit} ${i.name} × ${formatKurus(i.unitPrice)} = ${formatKurus(i.lineTotal)}`,
+      `• ${fmtQty(i.quantity)} ${i.unit} ${i.name} × ${formatKurus(i.unitPrice)} = ${formatKurus(i.lineTotal)}${vatTxt}`,
     );
   }
   out.push("");
   if (r.vatAmount > 0) {
     out.push(`Ara toplam: ${formatKurus(r.subtotal)}`);
-    out.push(`KDV %${r.vatRate}: ${formatKurus(r.vatAmount)}`);
+    for (const v of r.vatLines) out.push(`KDV %${v.rate}: ${formatKurus(v.amount)}`);
   }
   out.push(`*Alış toplamı: ${formatKurus(r.total)}*`);
   out.push("");

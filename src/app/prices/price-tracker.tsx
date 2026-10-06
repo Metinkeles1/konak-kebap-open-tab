@@ -47,6 +47,7 @@ const fmtPct = (pct: number) =>
   `${pct > 0 ? "+" : pct < 0 ? "−" : ""}%${Math.abs(pct).toLocaleString("tr-TR", { maximumFractionDigits: 1 })}`;
 
 // Seçili düğme stili — dönem ve yön seçicilerinde ortak.
+// Telefonda tam genişlik, eşit paylı düğmeler (başparmakla kolay); geniş ekranda içerik kadar.
 function Segmented<T extends string>({
   options,
   value,
@@ -57,13 +58,14 @@ function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="inline-flex flex-wrap gap-1 rounded-lg border border-line bg-surface-2 p-1">
+    <div className="flex w-full gap-1 rounded-lg border border-line bg-surface-2 p-1 sm:inline-flex sm:w-auto">
       {options.map((o) => (
         <button
           key={o.id}
           type="button"
           onClick={() => onChange(o.id)}
-          className={`rounded-md px-3 py-2 text-xs font-medium transition-colors sm:py-1.5 ${
+          aria-pressed={value === o.id}
+          className={`flex-1 whitespace-nowrap rounded-md px-2 py-2 text-xs font-medium transition-colors sm:flex-none sm:px-3 sm:py-1.5 ${
             value === o.id
               ? "bg-surface text-ink shadow-sm ring-1 ring-line"
               : "text-muted hover:text-ink"
@@ -262,51 +264,56 @@ export function PriceTracker({ lines, now }: { lines: PriceLine[]; now: number }
         />
       </div>
 
+      {/* Şüpheli giriş uyarısı — telefonda yer kaplamasın diye tek satır özet;
+          ayrıntı dokununca açılır. */}
       {stats.suspectCount > 0 && (
-        <p className="mt-4 rounded-lg border border-ember/25 bg-ember-soft/60 px-4 py-2.5 text-xs text-ink-soft">
-          <span className="font-semibold text-ember">⚠ {stats.suspectCount} kalemde</span> fiyat tek
-          seferde %{SUSPECT_PCT}&apos;tan fazla değişmiş — büyük olasılıkla yanlış girilmiş (ör. koli
-          yerine adet fiyatı). Bu kalemler toplamlara katılmadı; listede{" "}
-          <span className="font-medium">“kontrol et”</span> ile işaretli. Fiyatı Ürünler
-          sayfasından düzeltebilirsin.
-        </p>
+        <details className="group mt-4 rounded-lg border border-ember/25 bg-ember-soft/60 px-4 py-2.5 text-xs text-ink-soft">
+          <summary className="cursor-pointer list-none">
+            <span className="font-semibold text-ember">⚠ {stats.suspectCount} kalem kontrol edilmeli</span>
+            <span className="text-muted"> — toplamlara katılmadı </span>
+            <span className="text-ember underline-offset-2 group-open:hidden">ayrıntı</span>
+          </summary>
+          <p className="mt-1.5">
+            Fiyat tek seferde %{SUSPECT_PCT}&apos;tan fazla değişmiş — büyük olasılıkla yanlış girilmiş (ör.
+            koli yerine adet fiyatı). Listede <span className="font-medium">“kontrol et”</span> ile
+            işaretli. Fiyatı Ürünler sayfasından düzeltebilirsin.
+          </p>
+        </details>
       )}
 
       {/* Toptancı bazında */}
+      {/* Toptancı bazında — dokununca listeyi o toptancıya filtreler.
+          Telefonda yatay kaydırılan kompakt kartlar (eskiden toptancı başına ~100px'lik
+          satırlar listeyi ekranın çok altına itiyordu); geniş ekranda satır listesi. */}
       {bySupplier.length > 0 && (
-        <Card title="Toptancı bazında" className="mt-6" bodyClassName="p-0">
-          <ul className="divide-y divide-line">
+        <Card title="Toptancı bazında · seçince liste filtrelenir" className="mt-6" bodyClassName="p-0">
+          <ul className="flex snap-x gap-2 overflow-x-auto overscroll-x-contain p-3 md:block md:divide-y md:divide-line md:overflow-visible md:p-0">
             {bySupplier.map((r) => {
               const active = supplier === r.id;
               return (
-                <li key={r.id}>
+                <li key={r.id} className="w-44 shrink-0 snap-start md:w-auto">
                   <button
                     type="button"
                     onClick={() => setSupplier(active ? "" : r.id)}
-                    className={`flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-3 text-left transition-colors hover:bg-surface-2 ${
-                      active ? "bg-ember-soft/60" : ""
+                    aria-pressed={active}
+                    className={`flex h-full w-full flex-col gap-1.5 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-surface-2 active:bg-surface-2 md:flex-row md:items-center md:justify-between md:gap-4 md:rounded-none md:border-0 md:px-5 md:py-3 ${
+                      active ? "border-ember/50 bg-ember-soft/60" : "border-line"
                     }`}
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-ink">
-                        {r.name}
-                      </span>
+                      <span className="block truncate text-sm font-medium text-ink">{r.name}</span>
                       <span className="text-xs text-muted">
                         {r.up} zam{r.down > 0 ? ` · ${r.down} indirim` : ""}
                         {active ? " · filtre açık" : ""}
                       </span>
                     </span>
-                    <span className="flex items-center gap-4 text-sm">
-                      <span className="text-right">
-                        <span className="block text-[10px] uppercase tracking-wider text-muted">
-                          Ort.
-                        </span>
+                    <span className="flex items-end justify-between gap-3 text-sm md:items-center md:gap-4">
+                      <span className="md:text-right">
+                        <span className="block text-[10px] uppercase tracking-wider text-muted">Ort.</span>
                         <TrendDelta pct={r.avgPct} />
                       </span>
-                      <span className="w-28 text-right">
-                        <span className="block text-[10px] uppercase tracking-wider text-muted">
-                          Fazla ödenen
-                        </span>
+                      <span className="text-right md:w-28">
+                        <span className="block text-[10px] uppercase tracking-wider text-muted">Fazla ödenen</span>
                         <ExtraCost kurus={r.extra} />
                       </span>
                     </span>
@@ -322,8 +329,8 @@ export function PriceTracker({ lines, now }: { lines: PriceLine[]; now: number }
       <section className="mt-6 rounded-card border border-line bg-surface shadow-card">
         <div className="flex flex-col gap-3 border-b border-line p-4 lg:flex-row lg:items-center lg:justify-between">
           <Segmented options={DIRECTIONS} value={direction} onChange={setDirection} />
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <div className="relative sm:w-56">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row">
+            <div className="relative col-span-2 sm:w-56">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
                 ⌕
               </span>
@@ -337,7 +344,7 @@ export function PriceTracker({ lines, now }: { lines: PriceLine[]; now: number }
             <select
               value={supplier}
               onChange={(e) => setSupplier(e.target.value)}
-              className={`${inputClass} sm:w-44`}
+              className={`${inputClass} min-w-0 truncate sm:w-44`}
               aria-label="Toptancı"
             >
               <option value="">Tüm toptancılar</option>
@@ -350,12 +357,12 @@ export function PriceTracker({ lines, now }: { lines: PriceLine[]; now: number }
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortId)}
-              className={`${inputClass} sm:w-40`}
+              className={`${inputClass} min-w-0 truncate sm:w-40`}
               aria-label="Sıralama"
             >
               {SORTS.map((s) => (
                 <option key={s.id} value={s.id}>
-                  Sırala: {s.label}
+                  ↕ {s.label}
                 </option>
               ))}
             </select>
@@ -410,7 +417,7 @@ function PriceRow({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-5 py-3 text-left transition-colors hover:bg-surface-2 md:grid-cols-[minmax(0,1fr)_120px_190px_80px_120px] ${
+        className={`group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-3 text-left transition-colors hover:bg-surface-2 active:bg-surface-2 md:gap-x-4 md:px-5 md:grid-cols-[minmax(0,1fr)_120px_190px_80px_120px] ${
           open ? "bg-surface-2" : ""
         }`}
       >
@@ -420,13 +427,13 @@ function PriceRow({
             {s.suspect && (
               <span
                 title="Fiyat tek seferde çok büyük değişmiş; yanlış giriş olabilir. Toplamlara katılmadı."
-                className="ml-2 rounded-full border border-ember/25 bg-ember-soft px-1.5 py-px text-[10px] font-medium text-ember"
+                className="ml-2 inline-block whitespace-nowrap rounded-full border border-ember/25 bg-ember-soft px-1.5 py-px align-middle text-[10px] font-medium text-ember"
               >
                 ⚠ kontrol et
               </span>
             )}
           </span>
-          <span className="block truncate text-xs text-muted">
+          <span className="block text-xs text-muted md:truncate">
             {line.supplierName ?? "Toptancı belirtilmemiş"} ·{" "}
             <span className="nums">{s.changes.length}</span> değişim · son{" "}
             <span className="nums">{s.lastChange ? formatDate(s.lastChange) : "—"}</span>
@@ -459,7 +466,7 @@ function PriceRow({
       </button>
 
       {open && (
-        <div className="border-t border-line bg-surface-2/60 px-5 py-4">
+        <div className="border-t border-line bg-surface-2/60 px-4 py-4 md:px-5">
           <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted">
             Fiyat değişimleri
           </p>

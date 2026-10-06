@@ -9,6 +9,7 @@ import {
   deleteProduct,
   updateSupplierPackagePrice,
   setDefaultSupplier,
+  setProductVatRate,
   updatePackage,
   deletePackage,
   renameProduct,
@@ -16,6 +17,7 @@ import {
 import { Badge, inputClass } from "@/components/ui";
 import { SubmitButton, DeleteButton } from "@/components/form";
 import { Modal } from "@/components/modal";
+import { vatOptions } from "@/lib/vat";
 import type { ProductDetail } from "./product-list";
 
 type Cell = { price: number; prevPrice: number | null; date: string; source: string };
@@ -494,6 +496,37 @@ export function ProductModal({
           </SubmitButton>
           <span className="text-[11px] text-muted">
             ★ ile işaretlenir · alış formunda fiyatı öne çıkar
+          </span>
+        </form>
+
+        {/* KDV oranı: alışta bu ürünün kalemine varsayılan gelir. Alışta satırda
+            değiştirilirse buraya da yazılır. Geçmiş alışlar etkilenmez (dondurulmuş). */}
+        <form
+          action={setProductVatRate}
+          className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm shadow-card"
+        >
+          <input type="hidden" name="productId" value={product.id} />
+          <label htmlFor="productVat" className="text-xs font-medium text-muted">
+            KDV oranı
+          </label>
+          <select
+            key={product.vatRate}
+            id="productVat"
+            name="vatRate"
+            defaultValue={product.vatRate}
+            className={`${inputClass} w-32`}
+          >
+            {vatOptions(product.vatRate).map((r) => (
+              <option key={r} value={r}>
+                {r === 0 ? "KDV yok" : `%${r}`}
+              </option>
+            ))}
+          </select>
+          <SubmitButton variant="ghost" className="px-3! py-1.5! text-xs!">
+            Kaydet
+          </SubmitButton>
+          <span className="text-[11px] text-muted">
+            Alışlarda bu ürüne otomatik gelir · geçmiş alışlar değişmez
           </span>
         </form>
 

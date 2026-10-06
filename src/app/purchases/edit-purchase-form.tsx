@@ -3,10 +3,13 @@
 import { useMemo, useState, useTransition } from "react";
 import { updatePurchase, type EditPurchaseItem } from "@/app/actions";
 import { formatKurus, tlToKurus } from "@/lib/money";
+import { lineVat, vatBreakdown } from "@/lib/vat";
+import { VatSelect, VatSummary } from "@/components/vat";
 
 export type ProductOpt = {
   productId: string;
   name: string;
+  vatRate: number; // ürünün kayıtlı KDV oranı (%)
   units: { packageId: string; unit: string; lastPrice: number | null }[];
 };
 
@@ -18,6 +21,8 @@ export type ListItem = {
   unit: string;
   quantity: number;
   unitPrice: number;
+  vatRate: number; // kalemin dondurulmuş KDV oranı (%)
+  vatAmount: number; // kalemin dondurulmuş KDV tutarı (kuruş)
 };
 
 export type ListPurchase = {
@@ -29,8 +34,7 @@ export type ListPurchase = {
   note: string | null;
   items: ListItem[];
   subtotal: number; // KDV hariç (kalemler toplamı)
-  vatRate: number | null; // KDV oranı (%); null = KDV yok
-  vatAmount: number; // KDV tutarı (kuruş)
+  vatAmount: number; // kalemlerin KDV toplamı (kuruş)
   total: number; // KDV dahil genel toplam
 };
 
@@ -43,10 +47,15 @@ type Row = {
   label?: string;
   quantity: string;
   price: string; // TL metni (boş = birimin/last fiyatı)
+  vat: number; // KDV oranı (%) — mevcut kalemde dondurulmuş oran, yenide ürünün oranı
 };
 
 const field =
   "w-full rounded-lg border border-line bg-surface px-3 py-2 text-base text-ink sm:text-sm placeholder:text-muted/70 outline-none transition focus:border-ember focus:ring-2 focus:ring-ember/15";
+
+// Satır ızgarası: telefonda [ürün/birim/fiyat | adet/KDV | ✕], geniş ekranda tek satır.
+const ROW_COLS =
+  "grid-cols-[minmax(0,1fr)_5.5rem_28px] sm:grid-cols-[minmax(0,1fr)_120px_72px_110px_92px_28px]";
 
 let rowSeq = 0;
 const nextKey = () => `r${rowSeq++}`;
@@ -86,7 +95,6 @@ export function EditPurchaseForm({
   const [supplierId, setSupplierId] = useState(purchase.supplierId);
   const [date, setDate] = useState(isoToLocal(purchase.date));
   const [note, setNote] = useState(purchase.note ?? "");
-  const [vat, setVat] = useState(purchase.vatRate != null ? String(purchase.vatRate) : "");
   const [showAll, setShowAll] = useState(false);
   const [rows, setRows] = useState<Row[]>(() =>
     purchase.items.map((it) => ({
@@ -97,6 +105,7 @@ export function EditPurchaseForm({
       label: `${it.productName} · ${it.unit}`,
       quantity: String(it.quantity),
       price: kurusToInput(it.unitPrice),
+      vat: it.vatRate,
     })),
   );
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +133,7 @@ export function EditPurchaseForm({
   function addRow() {
     setRows((rs) => [
       ...rs,
-      { key: nextKey(), productId: "", packageId: "", quantity: "1", price: "" },
+      { key: nextKey(), productId: "", packageId: "", quantity: "1", price: "", vat: 0 },
     ]);
   }
 
@@ -147,18 +156,14 @@ export function EditPurchaseForm({
     return lastPriceOf(r.packageId, r.productId);
   }
 
-  const subtotal = rows.reduce((s, r) => {
-    const q = toQty(r.quantity);
+  // Kalem tutarları (KDV hariç) + her kalemin kendi KDV oranı → orana göre döküm.
+  const lines = rows.map((r) => {
     const p = rowPrice(r);
-    return s + (p != null ? q * p : 0);
-  }, 0);
-  // KDV oranı (% tam sayı); boş/0 ise KDV yok.
-  const vatRate = (() => {
-    const n = parseInt(vat.trim(), 10);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  })();
-  const vatAmount = vatRate ? Math.round((subtotal * vatRate) / 100) : 0;
-  const total = subtotal + vatAmount;
+    return { lineTotal: p != null ? Math.round(toQty(r.quantity) * p) : 0, vatRate: r.vat };
+  });
+  const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
+  const vatLines = vatBreakdown(lines);
+  const total = subtotal + lines.reduce((s, l) => s + lineVat(l.lineTotal, l.vatRate), 0);
 
   function save() {
     setError(null);
@@ -174,13 +179,14 @@ export function EditPurchaseForm({
         productPackageId: r.packageId,
         quantity: q,
         unitPriceTl: r.price,
+        vatRate: r.vat,
       });
     }
     if (!items.length) return setError("En az bir kalem gerekli.");
 
     startTransition(async () => {
       try {
-        const res = await updatePurchase({ id: purchase.id, supplierId, date, note, vatRate, items });
+        const res = await updatePurchase({ id: purchase.id, supplierId, date, note, items });
         if (!res.ok) return setError(res.error);
         onDone();
       } catch (e) {
@@ -228,11 +234,12 @@ export function EditPurchaseForm({
         <span className="text-muted/70">(bu toptancıya bağlı olmayanlar dahil)</span>
       </label>
 
-      <div className="mt-3 hidden grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted sm:grid">
+      <div className={`mt-3 hidden ${ROW_COLS} items-center gap-2 px-1 text-[11px] uppercase tracking-wider text-muted sm:grid`}>
         <span>Ürün</span>
         <span>Birim</span>
         <span>Adet</span>
         <span>Birim fiyat</span>
+        <span>KDV</span>
         <span />
       </div>
 
@@ -241,16 +248,21 @@ export function EditPurchaseForm({
           const isNew = !row.id;
           const lp = lastPriceOf(row.packageId, row.productId);
           return (
-            <div key={row.key} className="mt-2 grid grid-cols-[minmax(0,1fr)_4rem_minmax(0,1.2fr)_28px] items-center gap-2 rounded-lg border border-line p-2 sm:mt-0 sm:grid-cols-[minmax(0,1fr)_140px_72px_120px_28px] sm:border-0 sm:p-0">
+            <div key={row.key} className={`mt-2 grid ${ROW_COLS} items-center gap-2 rounded-lg border border-line p-2 sm:mt-0 sm:border-0 sm:p-0`}>
               {/* Ürün: mevcut kalemde etiket, yeni kalemde seçim */}
-              <div className="order-1 col-span-3 min-w-0 sm:col-span-1">
+              <div className="order-1 col-span-2 min-w-0 sm:col-span-1">
               {isNew ? (
                 <select
                   value={row.productId}
                   onChange={(e) => {
                     const pid = e.target.value;
                     const first = unitsOf(pid)[0];
-                    patch(row.key, { productId: pid, packageId: first?.packageId ?? "", price: "" });
+                    patch(row.key, {
+                      productId: pid,
+                      packageId: first?.packageId ?? "",
+                      price: "",
+                      vat: productById.get(pid)?.vatRate ?? 0, // ürünün kayıtlı oranı
+                    });
                   }}
                   className={field}
                 >
@@ -297,19 +309,24 @@ export function EditPurchaseForm({
                 onChange={(e) => patch(row.key, { quantity: e.target.value })}
                 placeholder="Adet"
                 title="Adet (kg için ondalık girebilirsiniz, ör. 2,5)"
-                className={`${field} nums order-4 sm:order-3`}
+                className={`${field} nums order-4 col-span-2 sm:order-3 sm:col-span-1`}
               />
               <input
                 inputMode="decimal"
                 value={row.price}
                 onChange={(e) => patch(row.key, { price: e.target.value })}
                 placeholder={lp != null ? `son ${formatKurus(lp)}` : "Fiyat"}
-                className={`${field} nums order-5 col-span-2 sm:order-4 sm:col-span-1`}
+                className={`${field} nums order-5 sm:order-4`}
+              />
+              <VatSelect
+                value={row.vat}
+                onChange={(v) => patch(row.key, { vat: v })}
+                className="order-6 col-span-2 w-full sm:order-5 sm:col-span-1"
               />
               <button
                 type="button"
                 onClick={() => removeRow(row.key)}
-                className="order-2 grid h-9 w-7 place-items-center rounded-lg text-muted transition-colors hover:bg-debt-soft hover:text-debt sm:order-5"
+                className="order-2 grid h-9 w-7 place-items-center rounded-lg text-muted transition-colors hover:bg-debt-soft hover:text-debt sm:order-6"
                 title="Kalemi kaldır"
               >
                 ✕
@@ -327,32 +344,9 @@ export function EditPurchaseForm({
         + Kalem ekle
       </button>
 
-      {/* KDV (opsiyonel) + toplam dökümü */}
-      <div className="mt-4 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-end sm:justify-between">
-        <label className="flex flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-muted">
-          KDV oranı (%)
-          <input
-            inputMode="numeric"
-            value={vat}
-            onChange={(e) => setVat(e.target.value)}
-            placeholder="Opsiyonel (ör. 20)"
-            title="Boş bırak = KDV yok. Tutar ara toplamdan hesaplanır."
-            className={`${field} nums w-40`}
-          />
-        </label>
-        <div className="text-sm sm:text-right">
-          <div className="text-muted">
-            Ara toplam <span className="nums ml-1 text-ink-soft">{formatKurus(subtotal)}</span>
-          </div>
-          {vatAmount > 0 && (
-            <div className="text-muted">
-              KDV %{vatRate} <span className="nums ml-1 text-ink-soft">{formatKurus(vatAmount)}</span>
-            </div>
-          )}
-          <div className="mt-0.5 text-muted">
-            Genel toplam <span className="nums ml-1 text-base font-semibold text-ink">{formatKurus(total)}</span>
-          </div>
-        </div>
+      {/* Toplam dökümü — KDV kalem bazında (her satırın kendi oranı) */}
+      <div className="mt-4 flex justify-end border-t border-line pt-4">
+        <VatSummary subtotal={subtotal} vatLines={vatLines} total={total} className="sm:text-right" />
       </div>
 
       <div className="mt-4 flex items-center justify-end border-t border-line pt-4">

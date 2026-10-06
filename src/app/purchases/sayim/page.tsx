@@ -34,6 +34,7 @@ export default async function SayimPage() {
           unit: u.unit,
           baseCount: u.baseCount,
           lastPrice: u.lastPrice,
+          vatRate: p.vatRate,
           freq: u.purchaseCount >= 2,
         })),
       )
