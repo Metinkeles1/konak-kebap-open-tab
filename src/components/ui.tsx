@@ -110,7 +110,9 @@ export function Stat({
         {icon && <span className="text-muted">{icon}</span>}
       </div>
       <p
-        className={`nums mt-2.5 whitespace-nowrap font-display font-semibold leading-none sm:mt-3 ${valueColor}`}
+        // text-[18px] sm:text-[24px]: `cqi` desteklemeyen eski tarayıcılar (iOS < 16)
+        // satır içi stili yok sayar; o zaman bu güvenli boyut kullanılır.
+        className={`nums mt-2.5 whitespace-nowrap font-display text-[18px] font-semibold leading-none sm:mt-3 sm:text-[24px] ${valueColor}`}
         style={{ fontSize: fitSize }}
       >
         {value}
